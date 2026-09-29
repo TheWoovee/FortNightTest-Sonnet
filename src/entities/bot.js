@@ -154,7 +154,7 @@ export class Bot extends Actor {
     const g = this.game;
     this.perceive();
     const t = g.time;
-    this.elevated = this.onGround && this.pos.y - g.terrain.heightAt(this.pos.x, this.pos.z) > 2.2 && !g.physics.overlaps(this.pos.x, this.pos.y, this.pos.z, 0.2, 0.2, 0);
+    this.elevated = this.onGround && this.pos.y - g.terrain.heightAt(this.pos.x, this.pos.z) > 2.2;
     // enemy memory
     const haveEnemy = this.enemy && this.enemy.alive && (this.enemyVisible || t - this.lastSeen.t < 3.5);
     const storm = g.storm;
@@ -340,7 +340,7 @@ export class Bot extends Actor {
     let tx = gx, tz = gz;
     const dx = gx - this.pos.x, dz = gz - this.pos.z, d = Math.hypot(dx, dz);
     if (d > 100) { tx = this.pos.x + (dx / d) * 80; tz = this.pos.z + (dz / d) * 80; }
-    const path = nav.findPath(this.pos.x, this.pos.z, tx, tz);
+    const path = nav.findPath(this.pos.x, this.pos.z, tx, tz, { snap: this.state === 'storm' ? 14 : 4 });     // storm goals may fall in the sea: settle for the nearest dry cell
     this.pathGoal = { x: gx, z: gz }; this.pathY = this.pos.y; this.pathIdx = 0;
     if (path) { this.path = path; this.noRoute = 0; this.pathRetryAt = 0; }
     else { this.path = null; this.noRoute++; this.pathRetryAt = g.time + 1.5; }
@@ -448,30 +448,7 @@ export class Bot extends Actor {
   act(dt) {
     const g = this.game, I = this.intent, t = g.time;
     const cur = this.inv.current;
-    // stuck detection
-    this.stuckCheck -= dt;
-    if (this.stuckCheck <= 0) {
-      this.stuckCheck = 0.5;
-      const moved = Math.hypot(this.pos.x - this.lastPos.x, this.pos.z - this.lastPos.z);
-      const trying = Math.hypot(I.moveX, I.moveZ) > 0.1;
-      this.stuckT = trying && moved < 0.3 ? this.stuckT + 0.5 : 0;
-      this.lastPos.copy(this.pos);
-      if (this.stuckT >= 1.0) { this.stuckT = 0; this.noProgress(); }
-    }
     this.unstick = Math.max(0, this.unstick - dt);
-    // progress watchdog: bumping around near a waypoint without getting closer (the position check above can't see that)
-    this.wdT -= dt;
-    if (this.wdT <= 0) {
-      this.wdT = 1.5;
-      const live = t - this.wpSet < 0.4;
-      if (live && Math.hypot(this.wpX - this.wdX, this.wpZ - this.wdZ) < 0.75) {
-        const d = Math.hypot(this.wpX - this.pos.x, this.wpZ - this.pos.z);
-        this.wdFail = this.wdD - d < 0.8 && d > 1.2 ? this.wdFail + 1 : 0;
-        this.wdD = d;
-        if (this.wdFail >= 3) { this.wdFail = 0; this.noProgress(); }
-      } else { this.wdFail = 0; this.wdD = Math.hypot(this.wpX - this.pos.x, this.wpZ - this.pos.z); }
-      this.wdX = this.wpX; this.wdZ = this.wpZ;
-    }
 
     switch (this.state) {
       case 'combat': this.actCombat(dt); break;
@@ -481,6 +458,33 @@ export class Bot extends Actor {
       case 'loot': this.actLoot(dt); break;
       default: this.actRoam(dt); break;
     }
+
+    // Stuck handling runs after the state has set this frame's intent (brain() clears it beforehand, so checking earlier
+    // would always see a bot that "isn't trying to move").
+    const trying = Math.hypot(I.moveX, I.moveZ) > 0.1;
+    this.stuckCheck -= dt;
+    if (this.stuckCheck <= 0) {
+      this.stuckCheck = 0.5;
+      const moved = Math.hypot(this.pos.x - this.lastPos.x, this.pos.z - this.lastPos.z);
+      this.stuckT = trying && moved < 0.3 ? this.stuckT + 0.5 : 0;
+      this.lastPos.copy(this.pos);
+      if (this.stuckT >= 1.0) { this.stuckT = 0; this.noProgress(); }
+    }
+    // progress watchdog: bumping around near a waypoint without getting closer (the position check above can't see that);
+    // fights strafe in place and snipers hold still, so only count while walking somewhere
+    this.wdT -= dt;
+    if (this.wdT <= 0) {
+      this.wdT = 1.5;
+      const live = trying && this.state !== 'combat' && t - this.wpSet < 0.4;
+      if (live && Math.hypot(this.wpX - this.wdX, this.wpZ - this.wdZ) < 0.75) {
+        const d = Math.hypot(this.wpX - this.pos.x, this.wpZ - this.pos.z);
+        this.wdFail = this.wdD - d < 0.8 && d > 1.2 ? this.wdFail + 1 : 0;
+        this.wdD = d;
+        if (this.wdFail >= 3) { this.wdFail = 0; this.noProgress(); }
+      } else { this.wdFail = 0; this.wdD = Math.hypot(this.wpX - this.pos.x, this.wpZ - this.pos.z); }
+      this.wdX = this.wpX; this.wdZ = this.wpZ;
+    }
+
     if (this.wantJump > 0) { this.wantJump -= dt; I.jump = true; I.jumpPressed = true; }
     // spare time: reload when nothing is going on
     if (this.state !== 'combat' && cur?.kind === 'weapon') {
@@ -606,12 +610,12 @@ export class Bot extends Actor {
 
   actStorm(dt) {
     const I = this.intent, st = this.game.storm;
-    const tgt = st.current;
-    // run toward the zone centre (a bit inside the edge)
-    const dx = tgt.x - this.pos.x, dz = tgt.z - this.pos.z;
-    const d = Math.hypot(dx, dz);
-    const k = Math.max(0, d - tgt.r * 0.6) / Math.max(d, 1);
-    this.moveTo(this.pos.x + dx * k, this.pos.z + dz * k, { stop: 2, reckless: true });
+    const c = st.current;
+    // run for a point 60 % of the way out from the zone centre (the centre itself once we're close), routed around lakes and buildings
+    const dx = c.x - this.pos.x, dz = c.z - this.pos.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const want = Math.min(d, c.r * 0.6);
+    this.followGoal(c.x - (dx / d) * want, c.z - (dz / d) * want, { stop: 2, reckless: true });
     I.sprint = true;
     this.faceMove(dt);
     if (this.wc.using) this.wc.cancelUse();
