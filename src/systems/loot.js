@@ -12,7 +12,7 @@ const BEAM_NEAR = 170;        // metres: rarity beams visible
 const BEAM_CHEST = 320;
 
 // ---- shared visuals ---------------------------------------------------------------------------------------------------------------
-const beamGeo = new THREE.CylinderGeometry(0.3, 0.3, 1, 10, 1, true);
+const beamGeo = new THREE.CylinderGeometry(0.2, 0.2, 1, 10, 1, true);
 beamGeo.translate(0, 0.5, 0);
 const discGeo = new THREE.CircleGeometry(0.9, 24);
 discGeo.rotateX(-Math.PI / 2);
@@ -27,9 +27,9 @@ function beamMaterial(color) {
     vertexShader: `varying vec2 vUv; varying vec3 vN; void main(){ vUv = uv; vN = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position,1.0); gl_Position = projectionMatrix * mv; }`,
     fragmentShader: `uniform vec3 uColor; varying vec2 vUv; varying vec3 vN;
       void main(){
-        float a = pow(1.0 - vUv.y, 1.6) * 0.75;
+        float a = pow(1.0 - vUv.y, 1.8) * 0.6;
         float fres = pow(abs(vN.z), 1.2);
-        gl_FragColor = vec4(uColor * 2.4, a * (0.25 + 0.75 * fres));
+        gl_FragColor = vec4(uColor * 1.5, a * (0.25 + 0.75 * fres));
       }`,
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
   });
@@ -185,7 +185,7 @@ export class Loot {
   _spawnVisual(it) {
     const g = new THREE.Group();
     const model = makeItemMesh(it.item);
-    const s = it.item.kind === 'weapon' ? 1.25 : it.item.kind === 'ammo' ? 1.15 : 1.35;
+    const s = it.item.kind === 'weapon' ? 1.65 : it.item.kind === 'ammo' ? 1.45 : 1.7;
     model.scale.setScalar(s);
     // lay weapons flat, centred on their length
     const holder = new THREE.Group();
@@ -195,7 +195,7 @@ export class Loot {
       model.position.set(0, 0, len * 0.4 * s);
       holder.rotation.z = 0.0;
     }
-    holder.position.y = 0.55;
+    holder.position.y = 0.7;
     g.add(holder);
     g.userData.holder = holder;
     const color = this.colorOf(it.item);
@@ -204,7 +204,7 @@ export class Loot {
     g.add(disc);
     g.userData.disc = disc;
     const beam = new THREE.Mesh(beamGeo, beamMaterial(color));
-    beam.scale.set(1, 6 + this.rarityOf(it.item) * 2.2, 1);
+    beam.scale.set(1, 3.4 + this.rarityOf(it.item) * 1.7, 1);
     beam.frustumCulled = false; beam.renderOrder = 3;
     beam.visible = false;
     g.add(beam);
@@ -232,7 +232,7 @@ export class Loot {
     g.rotation.y = c.yaw;
     g.scale.setScalar(1.15);
     const beam = new THREE.Mesh(beamGeo, beamMaterial(0xffc233));
-    beam.scale.set(1.3, 16, 1.3); beam.frustumCulled = false; beam.renderOrder = 3;
+    beam.scale.set(1.5, 11, 1.5); beam.frustumCulled = false; beam.renderOrder = 3;
     g.add(beam);
     g.userData.beam = beam;
     const disc = new THREE.Mesh(discGeo, discMaterial(0xffc233));
@@ -382,7 +382,7 @@ export class Loot {
       if (!it.alive || !it.group) continue;
       const h = it.group.userData.holder;
       h.rotation.y = t * 1.3 + it.phase;
-      h.position.y = 0.55 + Math.sin(t * 2.2 + it.phase) * 0.06;
+      h.position.y = 0.7 + Math.sin(t * 2.2 + it.phase) * 0.07;
       if (!it.settled) it.group.position.set(it.x, it.y, it.z);
     }
     for (const c of this.chests) {

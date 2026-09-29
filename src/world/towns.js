@@ -13,7 +13,7 @@ const PALETTES = {
   suburb: {
     walls: [0xf7c6cf, 0xbfe8d6, 0xfff1a8, 0xb9dbf7, 0xf9d9b6, 0xe5d1f6, 0xd8f0a8],
     roofs: [0xc4553a, 0x5c6f95, 0x7a4f3a, 0x4b5563, 0x2f7a6d],
-    trim: 0xffffff, shutters: [0x3d6ea8, 0x2f7a6d, 0xc4553a, 0x6b4a8a], chimney: 0xa5533d, base: 0xa2a4ab,
+    trim: 0xffffff, shutters: [0x3d6ea8, 0x2f7a6d, 0xc4553a, 0xe2b84a], chimney: 0xa5533d, base: 0xa2a4ab,
   },
   harbor: {
     walls: [0x5ba4cf, 0xe6a545, 0x6db38a, 0xe8685a, 0xc7ced6, 0xf0e0b0],
@@ -135,6 +135,7 @@ export function generateTown(env, town) {
   const corridor = (s, m = 0) => (s.axis === 'x'
     ? { minX: s.from, maxX: s.to, minZ: s.pos - s.w / 2 - m, maxZ: s.pos + s.w / 2 + m }
     : { minX: s.pos - s.w / 2 - m, maxX: s.pos + s.w / 2 + m, minZ: s.from, maxZ: s.to });
+  for (const st of streets) out.blocked.push({ type: 'rect', ...corridor(st, 2.2) });
   const lots = [];
   const groundOK = (r, doorPt) => {
     let hmin = 1e9, hmax = -1e9;

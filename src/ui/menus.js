@@ -22,7 +22,7 @@ const CONTROLS = [
   ['Move', ['W', 'A', 'S', 'D']], ['Sprint', ['Shift']], ['Jump / Glider', ['Space']], ['Crouch', ['C']],
   ['Fire', ['LMB']], ['Aim', ['RMB']], ['Reload', ['R']], ['Pick up / Open', ['E']],
   ['Select item', ['1–6', 'Wheel']], ['Drop item', ['G']], ['Build mode', ['Q']], ['Wall / Floor / Ramp / Roof', ['Z', 'X', 'C', 'V']],
-  ['Material (build)', ['R']], ['Inventory', ['Tab']], ['Map / Waypoint', ['M']], ['Pause', ['Esc']],
+  ['Material (build)', ['R']], ['Dance', ['B']], ['Inventory', ['Tab']], ['Map / Waypoint', ['M']], ['Pause', ['Esc']],
 ];
 
 const DEFAULTS = { sens: 1.0, volume: 0.8, quality: 'auto', invertY: false, bots: 29, difficulty: 'normal', loadout: false };

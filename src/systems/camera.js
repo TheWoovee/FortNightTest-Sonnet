@@ -103,7 +103,7 @@ export class CameraRig {
     let back = 3.25, side = 0.78, up = 0.22;
     if (p.building) { back = 3.9; side = 0.55; up = 0.5; }
     if (p.sprinting) { back = 3.6; side = 0.7; up = 0.22; }
-    if (aiming) { back = 1.55; side = 0.62; up = 0.1; }
+    if (aiming) { back = 2.2; side = 0.98; up = 0.14; }
     if (p.crouching) back -= 0.2;
     if (sniperScope) { back = 0; side = 0; up = 0; }
     this.boomTarget = back;

@@ -196,8 +196,8 @@ export class WeaponController {
     this.using = false;
     if (!it || it.kind !== 'consumable') return;
     const C = CONSUMABLES[it.id];
-    if (C.heal) a.health = Math.min(C.healCap ?? 100, Math.max(a.health, a.health + C.heal));
-    if (C.shield) a.shield = Math.min(C.shieldCap ?? 100, a.shield + C.shield);
+    if (C.heal) a.health = Math.max(a.health, Math.min(C.healCap ?? 100, a.health + C.heal));
+    if (C.shield) a.shield = Math.max(a.shield, Math.min(C.shieldCap ?? 100, a.shield + C.shield));
     a.stats.heals++;
     a.inv.consumeOne(this.useSlot);
     a.game.audio?.useEnd(a, C);

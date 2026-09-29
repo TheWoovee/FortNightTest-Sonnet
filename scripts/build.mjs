@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const watch = process.argv.includes('--watch');
 const dev = watch || process.argv.includes('--dev');
+const outArg = process.argv.find((a) => a.startsWith('--out='));
+const outFile = outArg ? resolve(outArg.slice(6)) : null;
 const p = (...s) => resolve(root, ...s);
 
 mkdirSync(p('dist'), { recursive: true });
@@ -46,7 +48,7 @@ const options = {
   bundle: true,
   format: 'iife',
   target: 'es2020',
-  outfile: p('dist/game.js'),
+  outfile: outFile || p('dist/game.js'),
   minify: !dev,
   sourcemap: dev ? 'inline' : false,
   legalComments: 'none',
@@ -56,7 +58,7 @@ const options = {
     name: 'post-build',
     setup(build) {
       build.onEnd((res) => {
-        if (res.errors.length) return;
+        if (res.errors.length || outFile) return;
         try {
           buildFonts();
           const n = buildSingleFile();

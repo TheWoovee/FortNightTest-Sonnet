@@ -9,6 +9,8 @@ import { Sky } from './sky.js';
 import { Physics } from '../physics/physics.js';
 import { generateTown, generateLandmark, paintTown } from './towns.js';
 import { Scatter } from './scatter.js';
+import { RoadDecals } from './roads.js';
+import { GrassField } from './grass.js';
 
 export class World {
   constructor(gfx, seed = 20240517) {
@@ -43,6 +45,7 @@ export class World {
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(baseCanvas, 0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
     this.baseCanvas = baseCanvas;
+    this.basePixels = base;
     this.colorCanvas = canvas;
     this.colorCtx = ctx;
 
@@ -88,6 +91,9 @@ export class World {
     this.scatter.build();
     console.log(`scatter: ${this.scatter.trees.length} trees, ${this.scatter.rocks.length} rocks, ${this.scatter.bushes.length} bushes, ${this.scatter.chunks.length} chunk meshes`);
     this.scatter.paintShadows(ctx, S);
+
+    this.roadDecals = new RoadDecals(this);
+    this.grass = new GrassField(this);
 
     this.colorTexture = new THREE.CanvasTexture(canvas);
     this.terrainMesh = new TerrainMesh(this.scene, this.terrain, this.colorTexture, this.gfx.renderer);
@@ -144,6 +150,7 @@ export class World {
     this.sky.update(dt, cameraPos);
     this.water.update(dt, this.scene);
     this.scatter.update(dt, this.time, cameraPos);
+    this.grass.update(dt, cameraPos, this.time);
     for (const a of this.animated) a.obj.rotation[a.axis] += a.speed * dt;
   }
 }

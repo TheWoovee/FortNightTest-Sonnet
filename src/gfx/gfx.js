@@ -98,6 +98,8 @@ export class Gfx {
     const scene = this.scene;
     this.hemi = new THREE.HemisphereLight(0xcfe8ff, 0x9a8a58, 1.15);
     scene.add(this.hemi);
+    // Indoor "eye adaptation": roofs block the sun, so inside a building the fill light is lifted and warmed.
+    this._indoor = { k: 0, sky: new THREE.Color(0xcfe8ff), ground: new THREE.Color(0x9a8a58), skyIn: new THREE.Color(0xfff4e6), groundIn: new THREE.Color(0xf0dfc0) };
 
     const sun = new THREE.DirectionalLight(0xfff0d0, 2.75);
     sun.castShadow = this.renderer.shadowMap.enabled;
@@ -148,6 +150,17 @@ export class Gfx {
     if (Math.abs(s - this.renderScale) < 0.01) return;
     this.renderScale = s;
     this.resize();
+  }
+
+  /** k = 0 outdoors … 1 fully indoors: brighter, warmer ambient so interiors don't read as murky. */
+  setIndoor(k) {
+    const I = this._indoor;
+    if (Math.abs(k - I.k) < 0.003) return;
+    I.k = k;
+    this.hemi.intensity = 1.15 + 0.75 * k;
+    this.hemi.color.copy(I.sky).lerp(I.skyIn, k);
+    this.hemi.groundColor.copy(I.ground).lerp(I.groundIn, k);
+    this.renderer.toneMappingExposure = 1 + 0.06 * k;
   }
 
   /** Follow a focus point with the sun's shadow frustum (texel-snapped to avoid shimmer). */

@@ -15,7 +15,7 @@ const skyVert = /* glsl */`
 
 const skyFrag = /* glsl */`
   uniform vec3 uZenith, uHorizon, uSunColor, uSunDir;
-  uniform float uTime, uCloudiness;
+  uniform float uTime, uCloudiness, uStorm;
   varying vec3 vDir;
 
   float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
@@ -51,6 +51,7 @@ const skyFrag = /* glsl */`
     }
     // sun disc + glow
     col += uSunColor * (pow(sd, 1400.0) * 9.0 + pow(sd, 90.0) * 0.32 + pow(sd, 7.0) * 0.1);
+    col = mix(col, vec3(0.34, 0.16, 0.56) * (0.55 + 0.6 * clamp(h + 0.2, 0.0, 1.0)), uStorm * 0.78);
     gl_FragColor = vec4(col, 1.0);
   }
 `;
@@ -72,6 +73,7 @@ export class Sky {
         uSunDir: { value: SKY.sunDir },
         uTime: { value: 0 },
         uCloudiness: { value: 0.45 },
+        uStorm: { value: 0 },
       },
     });
     this.dome = new THREE.Mesh(geo, this.mat);

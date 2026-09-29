@@ -7,7 +7,7 @@ import { clamp01, smoothstep, lerp } from '../util/math.js';
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 const C = {
-  grassA: [128, 210, 56], grassB: [96, 186, 50], grassC: [160, 222, 74],
+  grassA: [120, 200, 54], grassB: [86, 168, 46], grassC: [156, 216, 70],
   dry: [190, 212, 86], forest: [58, 138, 52], deep: [74, 152, 56],
   autumnA: [222, 158, 56], autumnB: [200, 112, 46],
   sand: [242, 219, 158], wetSand: [214, 190, 126], seabed: [232, 212, 152],
@@ -90,9 +90,9 @@ export class TerrainPainter {
     const n1 = N.noise2(x * 0.03 + 7, z * 0.03 - 3);
     const n2 = N.noise2(x * 0.13 - 11, z * 0.13 + 5);
     // meadow base
-    mix(out, C.grassB, C.grassA, 0.5 + 0.5 * n1);
+    mix(out, C.grassB, C.grassA, 0.5 + 0.65 * n1);
     mix(out, out, C.grassC, clamp01(0.5 + 0.7 * n2) * 0.3);
-    mix(out, out, C.dry, this.dryAt(x, z) * 0.5);
+    mix(out, out, C.dry, this.dryAt(x, z) * 0.62);
     mix(out, out, C.forest, this.forestAt(x, z) * 0.65);
     mix(out, out, C.deep, smoothstep(9, 24, h) * 0.45);
     // autumn tint

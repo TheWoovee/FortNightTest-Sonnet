@@ -7,10 +7,10 @@ const shade = (hex, k) => new THREE.Color(hex).multiplyScalar(k);
 
 export function lamp(ctx, x, z, y, o = {}) {
   const h = 4.6;
-  ctx.solid.cylinder(x, y, z, 0.13, h, 6, o.pole ?? 0x3b4252, { dark: 0.9 });
+  ctx.solid.cylinder(x, y, z, 0.13, h, 6, o.pole ?? 0x5a6478, { dark: 0.9 });
   ctx.solid.cylinder(x, y, z, 0.24, 0.35, 6, 0x2a2f3a);
   // arm + lamp head
-  ctx.solid.box(x - 0.6, y + h - 0.12, z - 0.06, x + 0.06, y + h, z + 0.06, o.pole ?? 0x3b4252);
+  ctx.solid.box(x - 0.6, y + h - 0.12, z - 0.06, x + 0.06, y + h, z + 0.06, o.pole ?? 0x5a6478);
   ctx.solid.box(x - 0.85, y + h - 0.22, z - 0.2, x - 0.4, y + h - 0.06, z + 0.2, 0xfff4c2, { dark: 1 });
   ctx.physics.addCylinder(x, z, 0.2, y - 0.3, y + h, { kind: 'prop', material: 'metal' });
   ctx.lights?.push({ x: x - 0.6, y: y + h - 0.3, z });

@@ -62,6 +62,7 @@ export class Actor {
     this.footstepDist = 0;
     this.submerged = 0;
     this.invulnerable = false;
+    this.emoteT = 0;
     this._vv = new THREE.Vector3();
   }
 
@@ -128,10 +129,12 @@ export class Actor {
     }
     this.height = damp(this.height, this.crouching ? P.crouchHeight : P.height, 16, dt);
 
+    if (this.emoteT > 0 && (Math.hypot(I.moveX, I.moveZ) > 0.1 || I.jump || I.fire || I.aim || this.swimming || !this.onGround)) this.emoteT = 0;
     // ---- desired velocity ----
     let mx = I.moveX, mz = I.moveZ;
-    const inLen = Math.min(1, Math.hypot(mx, mz));
-    if (inLen > 1e-3) { mx /= Math.hypot(mx, mz); mz /= Math.hypot(mx, mz) || 1; }
+    const rawLen = Math.hypot(mx, mz);
+    const inLen = Math.min(1, rawLen);
+    if (rawLen > 1e-3) { mx /= rawLen; mz /= rawLen; }
     const fwdDot = inLen > 0 ? -(mx * Math.sin(this.aimYaw) + mz * Math.cos(this.aimYaw)) : 0;
     const aiming = I.aim && this.isArmed && !wc.reloading;
     const canSprint = I.sprint && inLen > 0 && fwdDot > -0.25 && !this.crouching && !aiming && !wc.firingRecently && !wc.using && !this.building;
@@ -323,6 +326,7 @@ export class Actor {
     S.swingT = wc.swinging ? wc.swingT / wc.swingDur : -1;
     S.useT = wc.using ? wc.useT / wc.useDur : -1;
     S.building = this.building;
+    S.emote = this.emoteT > 0;
     S.landImpact = this.landImpact;
     S.hitFlinch = this.hitFlinch;
     S.deadT = this.deadT;

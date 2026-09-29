@@ -70,20 +70,28 @@ export class Input {
       if (!was && this.locked) this.onLockChange?.(true);
     });
     document.addEventListener('pointerlockerror', () => {
-      // Sandboxed iframes etc.: fall back to free-look so the game stays playable.
-      this.freeLook = true;
-      this.onLockChange?.(true);
+      // Browsers refuse re-locking for ~1 s after Esc; retry before giving up (sandboxed iframes never succeed).
+      if (this.wantLock && this._tries < 3) setTimeout(() => { if (this.wantLock && !this.locked) this._tryLock(); }, 1150);
+      else if (this.wantLock) { this.freeLook = true; this.onLockChange?.(true); }
     });
   }
 
-  requestLock() {
-    if (!this.lockSupported) { this.freeLook = true; this.onLockChange?.(true); return; }
+  _tryLock() {
+    this._tries = (this._tries || 0) + 1;
     try {
       const p = this.canvas.requestPointerLock();
-      if (p && p.catch) p.catch(() => { this.freeLook = true; this.onLockChange?.(true); });
+      if (p && p.catch) p.catch(() => {});
     } catch { this.freeLook = true; this.onLockChange?.(true); }
   }
-  exitLock() { if (document.pointerLockElement) document.exitPointerLock(); }
+
+  requestLock() {
+    this.wantLock = true;
+    this._tries = 0;
+    if (!this.lockSupported) { this.freeLook = true; this.onLockChange?.(true); return; }
+    if (this.locked) return;
+    this._tryLock();
+  }
+  exitLock() { this.wantLock = false; if (document.pointerLockElement) document.exitPointerLock(); }
 
   /** true while the key is held */
   key(code) { return this.down.has(code); }

@@ -9,21 +9,25 @@ const wallVert = /* glsl */`
   void main() { vUv = uv; vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }
 `;
 const wallFrag = /* glsl */`
-  uniform float uTime; uniform vec3 uColor; uniform float uRadius;
+  uniform float uTime; uniform vec3 uColor; uniform float uRadius; uniform float uIntensity;
   varying vec3 vW; varying vec2 vUv;
   float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
   float vnoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y); }
   void main() {
-    float ang = vUv.x * 6.2831853;
     float circ = uRadius * 6.2831853;
     vec2 p = vec2(vUv.x * circ * 0.035, vW.y * 0.028);
     float n = vnoise(p * vec2(1.0, 0.6) + vec2(0.0, -uTime * 0.35)) * 0.6 + vnoise(p * 2.7 + vec2(uTime * 0.12, -uTime * 0.6)) * 0.4;
     float bands = smoothstep(0.35, 0.8, n);
     float streak = pow(vnoise(vec2(vUv.x * circ * 0.09, uTime * 0.2)), 3.0);
-    float h = clamp(vW.y / 320.0, 0.0, 1.0);
-    float a = (0.34 + bands * 0.42 + streak * 0.35) * (1.0 - smoothstep(0.55, 1.0, h)) ;
+    // far away the curtain reads as a soft violet haze band on the horizon, up close it is the full churning wall
+    float far = smoothstep(120.0, 650.0, distance(vW.xz, cameraPosition.xz));
+    bands = mix(bands, 0.45, far * 0.7);
+    streak *= 1.0 - far * 0.6;
+    float h = clamp(vW.y / 240.0, 0.0, 1.0);
+    float a = (0.34 + bands * 0.42 + streak * 0.35) * (1.0 - smoothstep(0.3, 1.0, h));
     a *= smoothstep(-40.0, 12.0, vW.y);
+    a *= mix(1.0, 0.5, far) * uIntensity;
     vec3 col = uColor * (0.85 + bands * 0.9 + streak * 0.8);
     col += vec3(0.35, 0.1, 0.6) * (1.0 - h) * 0.6;
     gl_FragColor = vec4(col, a);
@@ -49,7 +53,7 @@ export class Storm {
     geo.translate(0, 300, 0);
     this.mat = new THREE.ShaderMaterial({
       vertexShader: wallVert, fragmentShader: wallFrag, transparent: true, depthWrite: false, side: THREE.DoubleSide,
-      uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color('#a24dff') }, uRadius: { value: 600 } }, fog: false,
+      uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color('#a24dff') }, uRadius: { value: 600 }, uIntensity: { value: 0.6 } }, fog: false,
     });
     this.wall = new THREE.Mesh(geo, this.mat);
     this.wall.renderOrder = 8;
@@ -57,6 +61,7 @@ export class Storm {
     this.wall.visible = false;
     game.gfx.scene.add(this.wall);
     this.outsideK = 0;
+    this.intensity = 0.6;
   }
 
   reset(seed) {
@@ -68,6 +73,8 @@ export class Storm {
     this.next = null;
     this.wall.visible = false;
     this.outsideK = 0;
+    this.intensity = 0.6;
+    this.mat.uniforms.uIntensity.value = 0.6;
   }
 
   start(initialDelay = 40) {
@@ -124,6 +131,10 @@ export class Storm {
     const g = this.game;
     this.mat.uniforms.uTime.value += dt;
     if (!this.active) return;
+    // the wall is only a faint haze until the first shrink begins
+    const wantI = this.index === 0 && this.state === 'wait' ? 0.6 : 1;
+    this.intensity += (wantI - this.intensity) * Math.min(1, dt * 0.7);
+    this.mat.uniforms.uIntensity.value = this.intensity;
     const ph = this.phases[this.index];
     this.timer -= dt;
     if (this.state === 'wait') {
@@ -195,6 +206,7 @@ export class Storm {
     fog.near = lerp(260, 20, k); fog.far = lerp(1900, 380, k);
     gfx.scene.background.copy(fog.color);
     gfx.post.uStorm.value = k;
+    if (g.world?.sky) g.world.sky.mat.uniforms.uStorm.value = k;
     // wall opacity slightly higher when the player is close
     return k;
   }

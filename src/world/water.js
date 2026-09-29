@@ -31,12 +31,17 @@ const frag = /* glsl */`
     return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
   }
 
-  vec2 waveGrad(vec2 p, float t) {
+  vec2 waveGrad(vec2 p, float t, float dist) {
+    // higher-frequency waves fade with distance to avoid moire/aliasing
+    float f1 = 1.0 / (1.0 + dist * 0.0025);
+    float f2 = 1.0 / (1.0 + dist * 0.006);
+    float f3 = 1.0 / (1.0 + dist * 0.016);
+    float f4 = 1.0 / (1.0 + dist * 0.04);
     vec2 g = vec2(0.0);
-    g += vec2( 0.80,  0.60) * cos(dot(p, vec2( 0.80,  0.60)) * 0.42 + t * 0.95) * 0.060;
-    g += vec2(-0.55,  0.83) * cos(dot(p, vec2(-0.55,  0.83)) * 0.77 + t * 1.30) * 0.040;
-    g += vec2( 0.31, -0.95) * cos(dot(p, vec2( 0.31, -0.95)) * 1.31 + t * 1.85) * 0.028;
-    g += vec2(-0.96, -0.28) * cos(dot(p, vec2(-0.96, -0.28)) * 2.10 + t * 2.40) * 0.018;
+    g += vec2( 0.80,  0.60) * cos(dot(p, vec2( 0.80,  0.60)) * 0.42 + t * 0.95) * 0.060 * f1;
+    g += vec2(-0.55,  0.83) * cos(dot(p, vec2(-0.55,  0.83)) * 0.77 + t * 1.30) * 0.040 * f2;
+    g += vec2( 0.31, -0.95) * cos(dot(p, vec2( 0.31, -0.95)) * 1.31 + t * 1.85) * 0.028 * f3;
+    g += vec2(-0.96, -0.28) * cos(dot(p, vec2(-0.96, -0.28)) * 2.10 + t * 2.40) * 0.018 * f4;
     return g;
   }
 
@@ -47,9 +52,10 @@ const frag = /* glsl */`
     if (depth < -0.02) discard;
 
     vec3 view = normalize(cameraPosition - vWorld);
-    vec2 g = waveGrad(vWorld.xz, uTime);
+    float camDist = length(cameraPosition - vWorld);
+    vec2 g = waveGrad(vWorld.xz, uTime, camDist);
     float rip = vnoise(vWorld.xz * 0.9 + uTime * 0.25) - 0.5;
-    g += vec2(rip, vnoise(vWorld.xz * 0.9 - uTime * 0.2 + 9.0) - 0.5) * 0.05;
+    g += vec2(rip, vnoise(vWorld.xz * 0.9 - uTime * 0.2 + 9.0) - 0.5) * 0.05 / (1.0 + camDist * 0.02);
     vec3 n = normalize(vec3(-g.x, 1.0, -g.y));
 
     float d = clamp(depth / 13.0, 0.0, 1.0);

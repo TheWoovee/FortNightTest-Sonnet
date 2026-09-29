@@ -104,6 +104,7 @@ export class Player extends Actor {
         if (w) { if (this.inv.cycle(w > 0 ? 1 : -1)) g.audio?.uiTick(); }
         if (inp.pressed('KeyQ')) this.setBuilding(true);
       }
+      if (inp.pressed('KeyB') && this.onGround && this.speedH < 1.5 && !this.wc.using && !this.swimming) { this.emoteT = this.emoteT > 0 ? 0 : 60; g.audio?.uiTick(); }
       if (inp.pressed('KeyE')) g.loot.interact(this);
       if (inp.pressed('KeyG')) g.dropSelected(this);
     } else inp.consumeWheel();

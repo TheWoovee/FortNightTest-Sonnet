@@ -389,6 +389,12 @@ export class Game {
     if (winner?.isPlayer) {
       winner.stats.placement = 1;
       winner.stats.survived = this.matchTime;
+      winner.intent.moveX = winner.intent.moveZ = 0;
+      winner.wc.cancelUse();
+      winner.building = false;
+      winner.emoteT = 60;
+      winner.model.setHeld(null);
+      winner.wc.heldKey = 'none';
     }
   }
 
@@ -518,6 +524,7 @@ export class Game {
     this.world.update(dt, this.gfx.camera.position);
     this.fx.update(dt);
     this.storm.applyVisuals(dt);
+    this.updateIndoor(dt);
     this.gfx.post.uTime.value = this.time;
     this.audio.updateAmbient(dt);
   }
@@ -571,6 +578,7 @@ export class Game {
     this.world.update(dt, this.gfx.camera.position);
     this.fx.update(dt);
     this.storm.applyVisuals(dt);
+    this.updateIndoor(dt);
     this.gfx.post.uTime.value = this.time;
     this.updateLod();
     this.hud.update(dt);
@@ -658,6 +666,24 @@ export class Game {
       }
       if (!Number.isFinite(a.pos.x + a.pos.y + a.pos.z)) { a.pos.set(0, 20, 0); a.vel.set(0, 0, 0); }
     }
+  }
+
+  /** True while (x, y, z) is under a building's roof. */
+  isIndoors(x, y, z) {
+    for (const b of this.world.buildings) {
+      const f = b.foot;
+      if (x > f.minX && x < f.maxX && z > f.minZ && z < f.maxZ && y > b.floorY - 0.4 && y < b.top - 0.1) return true;
+    }
+    return false;
+  }
+
+  /** Smoothly lift the ambient light while the viewed player stands inside a building. */
+  updateIndoor(dt) {
+    const p = this.player;
+    const at = this.phase === 'match' && p && p.alive && p.mode === 'ground' ? p.pos : this.gfx.camera.position;
+    const target = this.isIndoors(at.x, at.y + 0.9, at.z) ? 1 : 0;
+    const I = this.gfx._indoor;
+    this.gfx.setIndoor(I.k + (target - I.k) * (1 - Math.exp(-6 * dt)));
   }
 
   updateLod() {

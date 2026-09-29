@@ -6,6 +6,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { clamp, damp, lerp, smoothstep, angleDiff, clamp01 } from '../util/math.js';
 
 const DOWN = new THREE.Vector3(0, -1, 0);
+const _qDance = new THREE.Quaternion(), _eDance = new THREE.Euler();
 const V = () => new THREE.Vector3();
 
 // ---- geometry helpers --------------------------------------------------------------------------------------
@@ -310,7 +311,7 @@ export class CharacterModel {
     this.holderQ = new THREE.Quaternion();
     this.phase = 0;
     this.time = Math.random() * 10;
-    this.k = { crouch: 0, air: 0, sprint: 0, move: 0, ads: 0, armed: 0, swim: 0, fall: 0, glide: 0, dive: 0, dead: 0, lean: 0, twist: 0, ik: 0, squat: 0, use: 0 };
+    this.k = { emote: 0, crouch: 0, air: 0, sprint: 0, move: 0, ads: 0, armed: 0, swim: 0, fall: 0, glide: 0, dive: 0, dead: 0, lean: 0, twist: 0, ik: 0, squat: 0, use: 0 };
     this.detail = 0;
     this._tmp = { g: V(), f: V(), m: V(), pole: V() };
     this.flash = 0;
@@ -373,6 +374,7 @@ export class CharacterModel {
     k.use = damp(k.use, s.useT >= 0 ? 1 : 0, 12, dt);
     k.squat = damp(k.squat, s.landImpact || 0, 16, dt);
     k.armed = damp(k.armed, armed || s.building ? 1 : 0, 10, dt);
+    k.emote = damp(k.emote, s.emote && mode === 'ground' ? 1 : 0, 9, dt);
 
     // ---- locomotion phase ---------------------------------------------------------------------------------
     const spd = s.speed;
@@ -614,6 +616,32 @@ export class CharacterModel {
     } else {
       // ground: ease body tilt back to neutral
       this.body.rotation.x = lerp(this.body.rotation.x, 0, 1 - Math.exp(-10 * dt));
+    }
+
+    // ---- dance emote (blended over the base pose) ----------------------------------------------------------
+    if (k.emote > 0.01 && mode === 'ground') {
+      const e = k.emote, tt = this.time * 7.2;
+      const bounce = Math.abs(Math.sin(tt)) * 0.07;
+      this.hips.position.y = lerp(this.hips.position.y, HIP_H - 0.07 + bounce, e);
+      this.hips.rotation.y = lerp(this.hips.rotation.y, Math.sin(tt * 0.5) * 0.6, e);
+      this.hips.rotation.z = lerp(this.hips.rotation.z, Math.sin(tt) * 0.09, e);
+      this.spine.rotation.z = lerp(this.spine.rotation.z, -Math.sin(tt) * 0.13, e);
+      this.spine.rotation.y = lerp(this.spine.rotation.y, -Math.sin(tt * 0.5) * 0.4, e);
+      this.headPivot.rotation.x = lerp(this.headPivot.rotation.x, Math.sin(tt * 2) * 0.14, e);
+      const qa = _qDance, eu = _eDance;
+      for (let i = 0; i < 2; i++) {
+        const sgn = i ? 1 : -1, ph = i * Math.PI;
+        eu.set(2.5 + Math.sin(tt + ph) * 0.45, 0, sgn * (0.35 + Math.abs(Math.sin(tt * 0.5 + ph)) * 0.3));
+        qa.setFromEuler(eu);
+        this.shoulder[i].quaternion.slerp(qa, e);
+        eu.set(0.5 + Math.abs(Math.sin(tt + ph)) * 0.9, 0, 0);
+        qa.setFromEuler(eu);
+        this.fore[i].quaternion.slerp(qa, e);
+        this.thigh[i].rotation.x = lerp(this.thigh[i].rotation.x, Math.sin(tt + ph) * 0.45, e);
+        this.thigh[i].rotation.z = lerp(this.thigh[i].rotation.z, sgn * 0.12, e);
+        this.shin[i].rotation.x = lerp(this.shin[i].rotation.x, -Math.abs(Math.sin(tt + ph)) * 0.7 - 0.1, e);
+      }
+      if (e > 0.4) this.holder.visible = false;
     }
 
     // material effects

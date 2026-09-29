@@ -454,6 +454,7 @@ export function buildBlock(ctx, s) {
   const fpw = F.footprint();
   return {
     kind: s.kind || 'house', x: s.x, z: s.z, face: s.face, floorY, top: top, w: s.w, d: s.d,
+    foot: { minX: fpw.minX, maxX: fpw.maxX, minZ: fpw.minZ, maxZ: fpw.maxZ },
     rect: { minX: fpw.minX - 1.4, maxX: fpw.maxX + 1.4, minZ: fpw.minZ - 1.4, maxZ: fpw.maxZ + 1.4 },
     spots, upper, chest, nav, stories,
   };
