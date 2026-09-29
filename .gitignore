@@ -1,5 +1,8 @@
 node_modules/
-dist/
+dist/*
+!dist/stormfall.html
+!dist/game.js
+!dist/fonts.css
 *.log
 .DS_Store
 .scratch/

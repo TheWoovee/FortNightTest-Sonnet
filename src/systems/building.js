@@ -12,9 +12,9 @@ const RISE = 2.4;
 const FOUNDATION_MIN = 0.25;      // shallower gaps than this get no foundation block
 const FOUNDATION_MAX = 2.0;       // deeper than this the piece is treated as an elevated platform (no foundation)
 const LOOK = {
-  wood:  { frame: 0x7a4a26, panel: 0xdcaa66, groove: 0x9a6a36, skirt: 0x8a5f34 },
-  stone: { frame: 0x6a6a76, panel: 0xc07a5e, groove: 0xe4dfd4, skirt: 0x7c6a62 },
-  metal: { frame: 0x46505f, panel: 0x93abc9, groove: 0x6b7f9b, skirt: 0x556072 },
+  wood:  { frame: 0x9a6236, panel: 0xdcaa66, groove: 0x9a6a36, skirt: 0x9a6f42 },
+  stone: { frame: 0x8a8a98, panel: 0xc07a5e, groove: 0xe4dfd4, skirt: 0x8f7c74 },
+  metal: { frame: 0x66748a, panel: 0x93abc9, groove: 0x6b7f9b, skirt: 0x6a778c },
 };
 
 // ---- geometry ----------------------------------------------------------------------------------------------------------------------------
@@ -79,10 +79,10 @@ function rampGeo(mat, axis, dir, skirt) {
     for (const v of [0, G]) {
       const sign = v === 0 ? -1 : 1;
       const h = axis === 'x' ? [0, 0, sign] : [sign, 0, 0];
-      b.quad(P(0, -B, v), P(G, -B, v), P(G, H, v), P(0, 0, v), L.frame, h, 0.85, 0.85, 1, 1);
+      b.quad(P(0, -B, v), P(G, -B, v), P(G, H, v), P(0, 0, v), L.panel, h, 0.78, 0.78, 0.95, 0.95);
     }
-    b.quad(P(G, -B, 0), P(G, -B, G), P(G, H, G), P(G, H, 0), L.frame, norm([1, 0, 0]), 0.85, 0.85, 1, 1);
-    b.quad(P(0, -B, 0), P(0, -B, G), P(0, 0, G), P(0, 0, 0), L.frame, norm([-1, 0, 0]), 0.85, 0.85, 1, 1);
+    b.quad(P(G, -B, 0), P(G, -B, G), P(G, H, G), P(G, H, 0), L.panel, norm([1, 0, 0]), 0.78, 0.78, 0.95, 0.95);
+    b.quad(P(0, -B, 0), P(0, -B, G), P(0, 0, G), P(0, 0, 0), L.panel, norm([-1, 0, 0]), 0.78, 0.78, 0.95, 0.95);
     b.quad(P(0, -B, 0), P(G, -B, 0), P(G, -B, G), P(0, -B, G), L.skirt, [0, -1, 0], 0.7, 0.7, 0.7, 0.7);
     // stair grooves
     const steps = 8;
