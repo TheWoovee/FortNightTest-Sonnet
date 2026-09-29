@@ -18,6 +18,7 @@ export class WeaponController {
     this.stats = null;
     this.autoReloadAt = -1;
     this.equipT = 0;
+    this.needRelease = false;      // ignore a held fire button until it is released (e.g. after the last bandage is used)
   }
 
   get firingRecently() { return this.a.game.time - this.lastFire < 0.6; }
@@ -50,7 +51,7 @@ export class WeaponController {
   // ---- update ------------------------------------------------------------------------------------------------------------
   update(dt) {
     const a = this.a, g = a.game, I = a.intent;
-    this.fireCd = Math.max(0, this.fireCd - dt);
+    this.fireCd = Math.max(-0.06, this.fireCd - dt);   // a little negative carry keeps the fire rate frame-rate independent
     this.equipT = Math.max(0, this.equipT - dt);
     this.kick = Math.max(0, this.kick - dt * 7);
     this.bloom = Math.max(0, this.bloom - (this.stats?.bloomMax || 0.03) * 3.2 * dt);
@@ -61,6 +62,8 @@ export class WeaponController {
     }
     const cur = a.inv.current;
     if (a.swimming) { this.reloading = false; this.using = false; }
+    if (!I.fire) this.needRelease = false;
+    const fireHeld = I.fire && !this.needRelease;
 
     // reload progress
     if (this.reloading) {
@@ -79,17 +82,17 @@ export class WeaponController {
     if (cur.kind === 'weapon') {
       const W = this.stats;
       if (I.reload && !this.reloading) this.startReload();
-      const want = W.auto ? I.fire : I.firePressed;
+      const want = W.auto ? fireHeld : I.firePressed && !this.needRelease;
       if (want && this.fireCd <= 0 && !this.using && !a.swimming && this.equipT <= 0.06) {
         if (this.reloading) {
           // shotgun/sniper can be interrupted by firing if there's a loaded round
-          if (cur.mag > 0 && W.id !== 'ar') { this.reloading = false; this._shoot(cur, W); }
+          if (cur.mag > 0 && W.id === 'pump') { this.reloading = false; this._shoot(cur, W); }
         } else if (cur.mag > 0) this._shoot(cur, W);
         else if (a.inv.ammo[W.ammo] > 0) this.startReload();
         else if (I.firePressed) g.audio?.dryFire(a);
       }
     } else if (cur.kind === 'pickaxe') {
-      if (I.fire && !this.swinging && this.equipT <= 0.05 && !a.swimming) this.startSwing();
+      if (fireHeld && !this.swinging && this.equipT <= 0.05 && !a.swimming) this.startSwing();
       if (this.swinging) {
         this.swingT += dt;
         if (!this.swingHit && this.swingT >= this.swingDur * 0.47) { this.swingHit = true; g.combat.melee(a); }
@@ -102,7 +105,7 @@ export class WeaponController {
           this.useT += dt;
           if (this.useT >= this.useDur) this._finishUse();
         }
-      } else if (I.fire && this.equipT <= 0.05 && !a.swimming) this.startUse(a.inv.selected);
+      } else if (fireHeld && this.equipT <= 0.05 && !a.swimming) this.startUse(a.inv.selected);
     }
   }
 
@@ -146,7 +149,7 @@ export class WeaponController {
     const a = this.a, g = a.game;
     cur.mag--;
     a.inv.touch();
-    this.fireCd = 1 / W.rate;
+    this.fireCd = Math.max(this.fireCd, -0.06) + 1 / W.rate;
     this.lastFire = g.time;
     this.kick = 1;
     a.stats.shots++;
@@ -178,7 +181,10 @@ export class WeaponController {
     if (!needHp && !needSh) {
       if (a.isPlayer && a.game.time - (this._lastMsg || 0) > 1.2) {
         this._lastMsg = a.game.time;
-        a.game.hud?.toast(C.kind === 'shield' ? 'SHIELD FULL' : C.kind === 'heal' ? 'HEALTH AT MAX' : 'FULLY HEALED');
+        const capHp = C.healCap ?? 100, capSh = C.shieldCap ?? 100;
+        const msg = C.kind === 'shield' ? (capSh < 100 && a.shield < 100 ? `${C.name.toUpperCase()} ONLY FILLS TO ${capSh}` : 'SHIELD FULL')
+          : C.kind === 'heal' ? (capHp < 100 && a.health < 100 ? `${C.name.toUpperCase()} ONLY HEALS TO ${capHp}` : 'HEALTH AT MAX') : 'FULLY HEALED';
+        a.game.hud?.toast(msg);
       }
       return false;
     }
@@ -199,7 +205,7 @@ export class WeaponController {
     if (C.heal) a.health = Math.max(a.health, Math.min(C.healCap ?? 100, a.health + C.heal));
     if (C.shield) a.shield = Math.max(a.shield, Math.min(C.shieldCap ?? 100, a.shield + C.shield));
     a.stats.heals++;
-    a.inv.consumeOne(this.useSlot);
+    if (a.inv.consumeOne(this.useSlot)) this.needRelease = true;     // stack gone → the pickaxe is auto-selected; don't swing until fire is released
     a.game.audio?.useEnd(a, C);
     a.game.fx?.healPulse(a, C.color);
     if (a.isPlayer) a.game.hud?.pulseHeal(C);

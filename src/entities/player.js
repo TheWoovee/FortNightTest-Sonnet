@@ -60,7 +60,7 @@ export class Player extends Actor {
     // ---- intents -------------------------------------------------------------------------------------------------------------
     for (const k of Object.keys(I)) if (typeof I[k] === 'boolean') I[k] = false;
     I.moveX = 0; I.moveZ = 0;
-    if (!active) return;
+    if (!active) { inp.consumeWheel(); return; }      // don't bank wheel ticks while a menu is open
 
     let fx = 0, fz = 0;
     if (inp.key('KeyW')) fz += 1;
@@ -103,10 +103,10 @@ export class Player extends Actor {
         const w = inp.consumeWheel();
         if (w) { if (this.inv.cycle(w > 0 ? 1 : -1)) g.audio?.uiTick(); }
         if (inp.pressed('KeyQ')) this.setBuilding(true);
+        if (inp.pressed('KeyE')) g.loot.interact(this);
+        if (inp.pressed('KeyG')) g.dropSelected(this);
       }
       if (inp.pressed('KeyB') && this.onGround && this.speedH < 1.5 && !this.wc.using && !this.swimming) { this.emoteT = this.emoteT > 0 ? 0 : 60; g.audio?.uiTick(); }
-      if (inp.pressed('KeyE')) g.loot.interact(this);
-      if (inp.pressed('KeyG')) g.dropSelected(this);
     } else inp.consumeWheel();
   }
 

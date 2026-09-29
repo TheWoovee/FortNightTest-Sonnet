@@ -9,6 +9,8 @@ import { clamp, clamp01, damp } from '../util/math.js';
 
 const G = BUILD.grid, H = BUILD.height, T = BUILD.thickness;
 const RISE = 2.4;
+const FOUNDATION_MIN = 0.25;      // shallower gaps than this get no foundation block
+const FOUNDATION_MAX = 2.0;       // deeper than this the piece is treated as an elevated platform (no foundation)
 const LOOK = {
   wood:  { frame: 0x7a4a26, panel: 0xdcaa66, groove: 0x9a6a36, skirt: 0x8a5f34 },
   stone: { frame: 0x6a6a76, panel: 0xc07a5e, groove: 0xe4dfd4, skirt: 0x7c6a62 },
@@ -55,9 +57,7 @@ function floorGeo(mat, skirt) {
     b.box(0, -T - 0.04, f, f, 0.03, G - f, L.frame, { dark: 0.85 });
     b.box(G - f, -T - 0.04, f, G, 0.03, G - f, L.frame, { dark: 0.85 });
     for (let i = 1; i < 5; i++) b.box(f, 0.0, i * G / 5 - 0.02, G - f, 0.012, i * G / 5 + 0.02, L.groove, { dark: 1 });
-    if (skirt > 0.3) {
-      for (const [x, z] of [[0.25, 0.25], [G - 0.25, 0.25], [0.25, G - 0.25], [G - 0.25, G - 0.25]]) b.box(x - 0.14, -skirt, z - 0.14, x + 0.14, -T, z + 0.14, L.skirt, { dark: 0.7 });
-    }
+    if (skirt > FOUNDATION_MIN) b.box(0.04, -T - skirt, 0.04, G - 0.04, -T, G - 0.04, L.skirt, { dark: 0.7, top: false });
   });
 }
 
@@ -65,27 +65,25 @@ function floorGeo(mat, skirt) {
 function rampGeo(mat, axis, dir, skirt) {
   const L = LOOK[mat];
   return build((b) => {
-    // local: u along the slope [0,G] (low→high), v across [0,G]
+    // local: u along the slope [0,G] (low→high), v across [0,G]. The collider is a solid wedge, so the visual is too.
     const P = (u, y, v) => {
       const uu = dir > 0 ? u : G - u;
       return axis === 'x' ? [uu, y, v] : [v, y, uu];
     };
     const k = H / G;
+    const B = T + (skirt > FOUNDATION_MIN ? skirt : 0);
     const norm = (n) => (axis === 'x' ? [n[0] * (dir > 0 ? 1 : -1), n[1], n[2]] : [n[2], n[1], n[0] * (dir > 0 ? 1 : -1)]);
-    const top = L.panel;
     // sloped surface
-    b.quad(P(0, 0, 0), P(G, H, 0), P(G, H, G), P(0, 0, G), top, norm([-k, 1, 0]), 1, 1, 1, 1);
-    // underside
-    b.quad(P(0, -T, 0), P(G, H - T, 0), P(G, H - T, G), P(0, -T, G), L.skirt, norm([k, -1, 0]));
-    // sides (frames)
+    b.quad(P(0, 0, 0), P(G, H, 0), P(G, H, G), P(0, 0, G), L.panel, norm([-k, 1, 0]), 1, 1, 1, 1);
+    // sides (frames), back + front faces, underside
     for (const v of [0, G]) {
       const sign = v === 0 ? -1 : 1;
       const h = axis === 'x' ? [0, 0, sign] : [sign, 0, 0];
-      b.quad(P(0, -T, v), P(G, H - T, v), P(G, H, v), P(0, 0, v), L.frame, h, 0.85, 0.85, 1, 1);
+      b.quad(P(0, -B, v), P(G, -B, v), P(G, H, v), P(0, 0, v), L.frame, h, 0.85, 0.85, 1, 1);
     }
-    // back + front faces
-    b.quad(P(G, H - T, 0), P(G, H - T, G), P(G, H, G), P(G, H, 0), L.frame, norm([1, 0, 0]), 0.85, 0.85, 1, 1);
-    b.quad(P(0, -T, 0), P(0, -T, G), P(0, 0, G), P(0, 0, 0), L.frame, norm([-1, 0, 0]), 0.85, 0.85, 1, 1);
+    b.quad(P(G, -B, 0), P(G, -B, G), P(G, H, G), P(G, H, 0), L.frame, norm([1, 0, 0]), 0.85, 0.85, 1, 1);
+    b.quad(P(0, -B, 0), P(0, -B, G), P(0, 0, G), P(0, 0, 0), L.frame, norm([-1, 0, 0]), 0.85, 0.85, 1, 1);
+    b.quad(P(0, -B, 0), P(G, -B, 0), P(G, -B, G), P(0, -B, G), L.skirt, [0, -1, 0], 0.7, 0.7, 0.7, 0.7);
     // stair grooves
     const steps = 8;
     for (let i = 1; i < steps; i++) {
@@ -95,12 +93,6 @@ function rampGeo(mat, axis, dir, skirt) {
     // side rails
     for (const v of [0.0, G - 0.16]) {
       b.quad(P(0, 0.012, v), P(G, H + 0.012, v), P(G, H + 0.012, v + 0.16), P(0, 0.012, v + 0.16), L.frame, norm([-k, 1, 0]));
-    }
-    if (skirt > 0.3) {
-      for (const [u, v] of [[0.3, 0.3], [0.3, G - 0.3]]) {
-        const [x, , z] = P(u, 0, v);
-        b.box(x - 0.14, -skirt, z - 0.14, x + 0.14, -T, z + 0.14, L.skirt, { dark: 0.7 });
-      }
     }
   });
 }
@@ -115,6 +107,8 @@ function roofGeo(mat, ridge) {
     else b.box(G / 2 - 0.12, RISE - 0.06, 0, G / 2 + 0.12, RISE + 0.08, G, L.frame);
   });
 }
+
+const FAIL_TEXT = { blocked: 'SOMETHING IS IN THE WAY', buried: 'TOO STEEP TO BUILD HERE', water: "CAN'T BUILD ON WATER", far: 'TOO FAR AWAY' };
 
 const geoCache = new Map();
 function pieceGeometry(type, mat, axis, dir, skirt) {
@@ -156,6 +150,7 @@ export class BuildSystem {
     game.gfx.scene.add(this.ghost);
     this.ghostKey = '';
     this.ghostPulse = 0;
+    this._failT = -9;
   }
 
   clear() {
@@ -228,11 +223,19 @@ export class BuildSystem {
     const ci = Math.floor(pos.x / G), cj = Math.floor(pos.z / G);
     let feetY = pos.y;
     // near-ground snapping so small hops don't shift the level
-    const gr = g.physics.groundAt(pos.x, pos.z, feetY + 0.7).y;
+    const under = g.physics.groundAt(pos.x, pos.z, feetY + 0.7);
+    const gr = under.y;
+    const support = under.collider?.owner;       // read now: groundAt returns a shared result object
     const airborne = feetY - gr > 0.9;
     const anchor = this._anchor(ci, cj, feetY);
+    const underFoot = type === 'floor' && pitch < -0.85;
     let baseY;
-    if (anchor) {
+    if (!airborne && !underFoot && support?.kind === 'piece' && support.type === 'ramp') {
+      // standing on a ramp: what lies ahead continues the climb (up-slope) or drops back to the ramp's base (down-slope),
+      // whichever half of the ramp we happen to be on — this is what makes hold-to-build ramp rushes chain cleanly
+      const along = dirAxis === support.axis ? sgn * support.dir : 0;
+      baseY = along > 0 ? support.y + H : along < 0 ? support.y : support.y + Math.round((feetY - support.y) / H) * H;
+    } else if (anchor) {
       const rel = (feetY - anchor.y) / H;
       baseY = anchor.y + (airborne ? Math.floor(rel + 0.12) : Math.round(rel)) * H;
     } else baseY = airborne ? gr : gr;
@@ -270,25 +273,29 @@ export class BuildSystem {
       if (this.pieces.has(out.key)) { out.valid = false; }
     }
     if (out.valid && Math.hypot(cx - pos.x, cz - pos.z) > 13) { out.valid = false; out.reason = 'far'; }
-    if (out.valid && g.terrain.heightAt(cx, cz) > out.y1 + 0.2) { out.valid = false; out.reason = 'buried'; }
+    // floors may sink into a slope a little (building uphill), everything else must not be swallowed by the terrain
+    if (out.valid && g.terrain.heightAt(cx, cz) > out.y1 + (type === 'floor' ? 1.5 : 0.2)) { out.valid = false; out.reason = 'buried'; }
     if (out.valid && out.y < -6) { out.valid = false; out.reason = 'water'; }
     if (out.valid) {
       const wl = g.terrain.waterLevelAt(cx, cz);
       if (wl !== null && g.terrain.heightAt(cx, cz) < wl - 1.4 && !anchor) { out.valid = false; out.reason = 'water'; }
     }
     if (out.valid && g.physics.overlapsSolid(out.minX, out.maxX, out.minZ, out.maxZ, out.y0 + 0.02, out.y1 - 0.02, ['piece'])) { out.valid = false; out.reason = 'blocked'; }
-    out.skirt = anchor && Math.abs(anchor.y - out.y) < 0.01 && anchor.skirt < 0.3 ? 0 : this._skirtFor(out);
+    out.skirt = this._skirtFor(out);
     if (actorInv && out.valid && actorInv.mats[mat] < BUILD.cost) { out.valid = false; out.reason = 'mats'; }
     return out;
   }
 
   _skirtFor(t) {
-    // how far below the piece the ground lies (so ground-level pieces don't float)
-    const T_ = this.game.terrain;
+    // Foundation depth: how far the *terrain* lies below the piece, so ground-level pieces don't float over slopes.
+    // Pieces far above the terrain (upper levels, platforms) get none; supporting pieces are not consulted on purpose.
+    const Tr = this.game.terrain;
     const pts = [[t.minX, t.minZ], [t.maxX, t.minZ], [t.minX, t.maxZ], [t.maxX, t.maxZ], [(t.minX + t.maxX) / 2, (t.minZ + t.maxZ) / 2]];
     let low = 1e9;
-    for (const [x, z] of pts) low = Math.min(low, this.game.physics.groundAt(x, z, t.y + 0.4).y);
-    return clamp(t.y - low + 0.2, 0, 3);
+    for (const [x, z] of pts) low = Math.min(low, Tr.heightAt(x, z));
+    const drop = t.y - low;
+    if (drop > FOUNDATION_MAX + 0.3) return 0;
+    return Math.round(clamp(drop + 0.2, 0, FOUNDATION_MAX) * 2) / 2;
   }
 
   // ---- placement ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -298,7 +305,7 @@ export class BuildSystem {
     const M = MATERIALS[mat];
     const p = {
       kind: 'piece', type: t.type, mat, key: t.key, ci: t.ci, cj: t.cj, y: t.y, axis: t.axis, dir: t.dir, skirt: t.skirt,
-      hp: M.hp * 0.33, maxHp: M.hp, cells: t.cells, colliders: [], owner: actor, builtT: 0, flash: 0, mesh: null, alive: true,
+      hp: M.hp * 0.33, maxHp: M.hp, taken: 0, cells: t.cells, colliders: [], owner: actor, builtT: 0, flash: 0, mesh: null, alive: true, ownMat: true,
       minX: t.minX, maxX: t.maxX, minZ: t.minZ, maxZ: t.maxZ,
     };
     const geo = pieceGeometry(t.type, mat, t.axis, t.dir, t.skirt);
@@ -319,9 +326,9 @@ export class BuildSystem {
     if (t.type === 'wall') {
       p.colliders.push(P.addBox(t.minX, t.maxX, t.minZ, t.maxZ, t.y - Math.max(0.2, t.skirt), t.y + H, opt(false)));
     } else if (t.type === 'floor') {
-      p.colliders.push(P.addBox(t.minX, t.maxX, t.minZ, t.maxZ, t.y - T - (t.skirt > 0.3 ? t.skirt * 0.5 : 0), t.y, opt(true)));
+      p.colliders.push(P.addBox(t.minX, t.maxX, t.minZ, t.maxZ, t.y - T - (t.skirt > FOUNDATION_MIN ? t.skirt : 0), t.y, opt(true)));
     } else if (t.type === 'ramp') {
-      p.colliders.push(P.addRamp(t.minX, t.maxX, t.minZ, t.maxZ, t.y - T, t.y, t.y + H, t.axis, t.dir, opt(true)));
+      p.colliders.push(P.addRamp(t.minX, t.maxX, t.minZ, t.maxZ, t.y - T - (t.skirt > FOUNDATION_MIN ? t.skirt : 0), t.y, t.y + H, t.axis, t.dir, opt(true)));
     } else {
       const xc = (t.minX + t.maxX) / 2, zc = (t.minZ + t.maxZ) / 2;
       if (t.axis === 'x') {
@@ -347,8 +354,12 @@ export class BuildSystem {
     if (this.game.phase !== 'match' || actor.mode !== 'ground') return null;
     const t = this.resolve(type, actor.pos, actor.aimYaw, actor.aimPitch, mat, actor.inv);
     if (!t.valid) {
-      if (actor.isPlayer && t.reason === 'mats') { this.game.hud?.toast(`NOT ENOUGH ${mat.toUpperCase()}`, '255,120,120'); this.game.audio?.buildFail(); }
-      else if (actor.isPlayer) this.game.audio?.buildFail();
+      if (actor.isPlayer && this.game.time - this._failT > 0.45) {
+        this._failT = this.game.time;
+        const why = t.reason === 'mats' ? `NOT ENOUGH ${mat.toUpperCase()}` : FAIL_TEXT[t.reason];
+        if (why) this.game.hud?.toast(why, '255,120,120');
+        this.game.audio?.buildFail();
+      }
       return null;
     }
     if (!actor.inv.spend(BUILD.cost, mat)) return null;
@@ -359,17 +370,20 @@ export class BuildSystem {
   }
 
   // ---- damage --------------------------------------------------------------------------------------------------------------------------------------------------------
-  damagePiece(p, dmg, attacker, harvest) {
+  /** Structure damage. Player-built pieces never refund materials, so you can't farm your own walls. */
+  damagePiece(p, dmg) {
     if (!p.alive) return;
-    const before = p.hp;
-    p.hp -= dmg;
+    p.taken += dmg;
     p.flash = 1;
-    if (harvest && attacker) {
-      const gain = Math.max(1, Math.round(Math.min(dmg, before) * 0.35));
-      const got = attacker.inv.addMats(p.mat, gain);
-      if (attacker.isPlayer && got > 0) this.game.hud?.matTick?.(p.mat, got);
-    }
+    if (!p.ownMat) { p.mesh.material = this.baseMat.clone(); p.ownMat = true; }
+    this._refreshHp(p);
     if (p.hp <= 0) this._destroy(p, true);
+  }
+
+  /** hp = what the (still building-up) piece can currently hold minus the damage it has taken */
+  _refreshHp(p) {
+    const cap = p.builtT >= 1 ? p.maxHp : p.maxHp * (0.33 + 0.67 * p.builtT);
+    p.hp = cap - p.taken;
   }
 
   _destroy(p, fx) {
@@ -388,7 +402,7 @@ export class BuildSystem {
     for (const c of p.colliders) this.game.physics.remove(c);
     p.colliders.length = 0;
     this.group.remove(p.mesh);
-    p.mesh.material.dispose();
+    if (p.ownMat) p.mesh.material.dispose();
     this._indexRemove(p);
     this.pieces.delete(p.key);
     if (splice) { const i = this.list.indexOf(p); if (i >= 0) this.list.splice(i, 1); }
@@ -409,8 +423,8 @@ export class BuildSystem {
         pc.mesh.scale.set(1, pc.type === 'wall' ? s : 1, 1);
         m.opacity = 0.5 + 0.5 * e;
         m.color.setRGB(0.6 + 0.4 * e, 0.85 + 0.15 * e, 1);
-        pc.hp = Math.max(pc.hp, pc.maxHp * (0.33 + 0.67 * e) - (pc.maxHp - pc.hp > 0 ? 0 : 0));
-        if (e >= 1) { m.transparent = false; m.opacity = 1; m.color.setRGB(1, 1, 1); pc.hp = Math.min(pc.hp, pc.maxHp); }
+        this._refreshHp(pc);
+        if (e >= 1) { m.transparent = false; m.opacity = 1; m.color.setRGB(1, 1, 1); }
       }
       if (pc.flash > 0) {
         pc.flash = Math.max(0, pc.flash - dt * 6);
@@ -418,9 +432,14 @@ export class BuildSystem {
         const hurt = 1 - clamp01(pc.hp / pc.maxHp);
         pc.mesh.material.color.setRGB(k * (1 - hurt * 0.25), k * (1 - hurt * 0.3), k * (1 - hurt * 0.3));
         pc.mesh.position.x = pc.ox + (Math.random() - 0.5) * 0.03 * pc.flash;
-      } else if (pc.builtT >= 1 && pc.hp < pc.maxHp) {
+      } else if (pc.builtT >= 1 && pc.taken > 0) {
         const hurt = 1 - clamp01(pc.hp / pc.maxHp);
         pc.mesh.material.color.setRGB(1 - hurt * 0.25, 1 - hurt * 0.3, 1 - hurt * 0.3);
+      } else if (pc.builtT >= 1 && pc.ownMat) {
+        // settled and undamaged: drop the private material so pieces batch on the shared one
+        pc.mesh.material.dispose();
+        pc.mesh.material = this.baseMat;
+        pc.ownMat = false;
       }
     }
     if (!this.active || !p.alive || !p.building) { this.ghost.visible = false; return; }

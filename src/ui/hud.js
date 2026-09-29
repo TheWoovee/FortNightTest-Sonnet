@@ -360,7 +360,7 @@ export class Hud {
         A.ammoMag.textContent = cur.mag;
         A.ammoRes.textContent = res;
         A.ammoIcon.src = svgUrl(AMMO_ICON[W.ammo]);
-        A.ammo.classList.toggle('low', cur.mag <= Math.ceil(W.mag * 0.25));
+        A.ammo.classList.toggle('low', W.mag > 1 ? cur.mag <= Math.ceil(W.mag * 0.25) : cur.mag === 0);
       }
       A.ammo.classList.remove('none');
     } else A.ammo.classList.add('none');
@@ -418,21 +418,21 @@ export class Hud {
     const g = this.game;
     const A = this.$;
     let tgt = null;
-    if (p.alive && p.mode === 'ground' && !p.building && !g.uiBlocking) tgt = g.loot.promptFor(p);
+    if (p.alive && p.mode === 'ground' && !p.building && !g.uiBlocking && !p.wc.using) tgt = g.loot.promptFor(p);
     if (!tgt) { if (this.last.promptKey) { this.last.promptKey = ''; A.prompt.classList.remove('on'); } return; }
-    let key, rgb, sub, nm, stats, url, action = 'Pick up';
+    let rgb, sub, nm, stats, url, action = 'Pick up', ok = true;
     if (tgt.type === 'chest') {
-      key = 'chest'; rgb = '255,194,51'; sub = 'Treasure'; nm = 'Chest'; stats = 'Contains loot'; url = svgUrl(SVG.build); action = 'Open';
+      rgb = '255,194,51'; sub = 'Treasure'; nm = 'Chest'; stats = 'Contains loot'; url = svgUrl(SVG.build); action = 'Open';
     } else {
       const it = tgt.it.item;
-      key = `${tgt.it.id}|${tgt.it.item.count ?? ''}`;
+      ok = tgt.ok;
       if (it.kind === 'weapon') {
         const S = weaponStats(it);
         rgb = rarityRGB(it.rarity); sub = RARITY[it.rarity].name; nm = S.name;
         const dps = Math.round(S.dmg * S.pellets * S.rate);
-        stats = `DMG ${Math.round(S.dmg)}${S.pellets > 1 ? '×' + S.pellets : ''} • MAG ${S.mag} • DPS ${dps}`;
+        const mag = it.mag != null && it.mag < S.mag ? `${it.mag}/${S.mag}` : S.mag;
+        stats = `DMG ${Math.round(S.dmg)}${S.pellets > 1 ? '×' + S.pellets : ''} • MAG ${mag} • DPS ${dps}`;
         url = g.icons?.get(it);
-        if (p.inv.freeSlot() < 0 && p.inv.selected !== 0) action = 'Swap';
       } else if (it.kind === 'consumable') {
         const C = CONSUMABLES[it.id];
         rgb = cssRGB(C.color); sub = C.kind === 'shield' ? 'Shield' : C.kind === 'both' ? 'Full restore' : 'Healing'; nm = `${C.name}${it.count > 1 ? ' ×' + it.count : ''}`;
@@ -442,13 +442,17 @@ export class Hud {
         const a = AMMO[it.id];
         rgb = cssRGB(a.color); sub = 'Ammo'; nm = `${a.name} ×${it.count}`; stats = `Reserve ${p.inv.ammo[it.id]} / ${a.cap}`; url = g.icons?.get(it);
       }
+      if (!ok) action = tgt.reason || "Can't pick up";
+      else if (tgt.swap) action = 'Swap';
     }
+    const key = `${sub}|${nm}|${stats}|${action}|${ok}|${url ? url.length : 0}`;
     if (this.last.promptKey !== key) {
       this.last.promptKey = key;
       A.prompt.style.setProperty('--r', rgb);
       A.promptSub.textContent = sub; A.promptNm.textContent = nm; A.promptStats.textContent = stats;
       A.promptImg.src = url || '';
       A.promptKey.textContent = action;
+      A.prompt.classList.toggle('blocked', !ok);
       A.prompt.classList.add('on');
     }
   }

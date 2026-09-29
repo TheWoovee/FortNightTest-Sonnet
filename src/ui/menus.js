@@ -159,12 +159,16 @@ export class Menus {
   // ---- inventory --------------------------------------------------------------------------------------------------------------------------------------------
   showInventory(on) {
     this.inv.classList.toggle('on', on);
-    if (on) this.refreshInventory();
+    if (on) this.refreshInventory(true);
   }
   get inventoryOpen() { return this.inv.classList.contains('on'); }
 
-  refreshInventory() {
+  /** Rebuilds the grid only when the inventory changed — replacing the DOM under a pressed mouse button would swallow the click. */
+  refreshInventory(force = false) {
     const g = this.game, p = g.player, icons = g.icons;
+    const key = `${p.inv.version}|${p.inv.selected}`;
+    if (!force && key === this._invKey) return;
+    this._invKey = key;
     const grid = this.inv.querySelector('.invgrid');
     grid.innerHTML = '';
     for (let i = 0; i < 6; i++) {
@@ -185,7 +189,13 @@ export class Menus {
       }
       grid.append(el(html));
     }
-    grid.querySelectorAll('.drop').forEach((d) => { d.onclick = () => { this.game.dropSlot(p, +d.dataset.i); this.refreshInventory(); }; });
+    grid.onpointerdown = (e) => {
+      const d = e.target.closest?.('.drop');
+      if (!d || e.button !== 0) return;
+      e.preventDefault();
+      this.game.dropSlot(p, +d.dataset.i);
+      this.refreshInventory(true);
+    };
     const ar = this.inv.querySelector('.ammoRow');
     ar.innerHTML = Object.keys(AMMO).map((k) => `<div class="ammoPill"><img src="${svgUrl(AMMO_ICON[k])}" style="width:calc(var(--u)*26)" alt=""><b>${p.inv.ammo[k]}</b></div>`).join('');
     const mr = this.inv.querySelector('.mats');

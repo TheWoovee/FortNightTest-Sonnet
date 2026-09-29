@@ -42,6 +42,11 @@ export class CameraRig {
     const cam = this.camera;
     this.shake = Math.max(0, this.shake - dt * 2.4);
     this.shakeT += dt;
+    if (this.mode === 'menu' || this.mode === 'bus' || this.mode === 'air' || this.mode === 'spectate') {
+      // the scope overlay only exists in the follow rig; make sure it can't linger into other modes / the next match
+      this.scoped = false;
+      this.scopeT = damp(this.scopeT, 0, 18, dt);
+    }
     switch (this.mode) {
       case 'menu': this._menu(dt); break;
       case 'bus': this._bus(dt); break;

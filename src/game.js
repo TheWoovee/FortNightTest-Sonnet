@@ -305,6 +305,7 @@ export class Game {
 
     this.camera.mode = 'bus';
     this.camera.initialised = false;
+    this.camera.scoped = false; this.camera.scopeT = 0;
     this.hud.setVisible(true);
     this.hud.setBuildMode(false);
     this.hud.dropPrompt(true, 'Press SPACE to jump', 'Steer with the mouse • Look down to dive');
@@ -430,7 +431,10 @@ export class Game {
     if (i <= 0) return;
     const it = actor.inv.removeSlot(i);
     if (!it) return;
-    this.loot.drop(it, actor.pos.x + Math.sin(-actor.aimYaw) * 0.6, actor.pos.y, actor.pos.z - Math.cos(actor.aimYaw) * 0.6, actor.vel);
+    // toss it just in front of the actor — unless a wall is in the way, then drop it at their feet
+    let dx = Math.sin(-actor.aimYaw) * 0.6, dz = -Math.cos(actor.aimYaw) * 0.6;
+    if (!this.physics.lineClear(actor.pos.x, actor.pos.y + 0.9, actor.pos.z, actor.pos.x + dx, actor.pos.y + 0.9, actor.pos.z + dz, { bullets: false, terrain: false })) { dx = 0; dz = 0; }
+    this.loot.drop(it, actor.pos.x + dx, actor.pos.y, actor.pos.z + dz, actor.vel, actor.aimYaw);
     if (actor.isPlayer) this.audio.uiTick();
   }
   dropSelected(actor) { this.dropSlot(actor, actor.inv.selected); }

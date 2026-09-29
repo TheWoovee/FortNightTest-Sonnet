@@ -132,7 +132,7 @@ export class Combat {
       } else if (hit.type === 'world') {
         const col = hit.collider;
         g.fx.impact(hit.x, hit.y, hit.z, hit.nx, hit.ny, hit.nz, col?.material || (hit.terrain ? 'dirt' : 'stone'), col?.kind);
-        if (col?.owner?.kind === 'piece') g.build.damagePiece(col.owner, W.structDmg * this.falloff(W, dist), actor, false);
+        if (col?.owner?.kind === 'piece') g.build.damagePiece(col.owner, W.structDmg * this.falloff(W, dist));
         if (isPlayer && p === 0) g.audio?.impact(hit.x, hit.y, hit.z, col?.material || 'dirt');
       }
     }
@@ -178,7 +178,7 @@ export class Combat {
       const col = hit.collider;
       const owner = col?.owner;
       if (owner?.kind === 'piece') {
-        g.build.damagePiece(owner, PICKAXE.structDmg, actor, true);
+        g.build.damagePiece(owner, PICKAXE.structDmg);
         g.fx.impact(hit.x, hit.y, hit.z, hit.nx, hit.ny, hit.nz, owner.mat, 'piece');
         g.audio?.pickaxeHit(actor, owner.mat);
       } else if (owner && (owner.kind === 'tree' || owner.kind === 'rock' || owner.kind === 'prop')) {

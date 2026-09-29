@@ -10,6 +10,7 @@ import { clamp } from '../util/math.js';
 const ACTIVATE = 85;          // metres: item model visible
 const BEAM_NEAR = 170;        // metres: rarity beams visible
 const BEAM_CHEST = 320;
+const LOS = { bullets: false, terrain: false };   // pickups must not reach through walls
 
 // ---- shared visuals ---------------------------------------------------------------------------------------------------------------
 const beamGeo = new THREE.CylinderGeometry(0.2, 0.2, 1, 10, 1, true);
@@ -169,9 +170,11 @@ export class Loot {
     return it;
   }
 
-  drop(item, x, y, z, actorVel) {
-    const a = Math.random() * Math.PI * 2, s = 1.5 + Math.random() * 1.8;
-    return this.spawn(item, x, y + 0.6, z, { vel: [Math.cos(a) * s + (actorVel?.x || 0) * 0.2, 3.2 + Math.random() * 1.5, Math.sin(a) * s + (actorVel?.z || 0) * 0.2], noPickupUntil: this.game.time + 0.7 });
+  /** Toss an item. With `yaw` it lands in front of the dropper (inside pickup reach); otherwise it scatters. */
+  drop(item, x, y, z, actorVel, yaw) {
+    const a = yaw != null ? Math.atan2(-Math.cos(yaw), -Math.sin(yaw)) + (Math.random() - 0.5) * 1.1 : Math.random() * Math.PI * 2;
+    const s = yaw != null ? 1.5 + Math.random() * 0.7 : 1.2 + Math.random() * 1.4;
+    return this.spawn(item, x, y + 0.6, z, { vel: [Math.cos(a) * s + (actorVel?.x || 0) * 0.15, 3.2 + Math.random() * 1.2, Math.sin(a) * s + (actorVel?.z || 0) * 0.15], noPickupUntil: this.game.time + 0.7 });
   }
 
   colorOf(item) {
@@ -256,20 +259,22 @@ export class Loot {
     items.push({ kind: 'ammo', id: w.ammo, count: AMMO[w.ammo].perBox });
     items.push(rng.chance(0.5) ? this.rollFloorItem(rng, 0.5) : { kind: 'consumable', id: rng.pick(['bandage', 'minishield', 'medkit', 'shield']), count: 2, rarity: 0 });
     if (c.group) c.group.userData.beam.visible = false;
+    const toward = by ? Math.atan2(by.pos.x - c.x, by.pos.z - c.z) : c.yaw;
     items.forEach((item, i) => {
-      const a = c.yaw + Math.PI + (i - 1) * 0.9;
-      const it = this.spawn(item, c.x, c.y + 0.5, c.z, { vel: [Math.sin(a) * 2.6, 4.2 + i * 0.3, Math.cos(a) * 2.6], noPickupUntil: g.time + 0.5 });
+      const a = toward + (i - 1) * 0.7, s = 1.5 + (i % 2) * 0.3;
+      const it = this.spawn(item, c.x, c.y + 0.5, c.z, { vel: [Math.sin(a) * s, 4.4 + i * 0.3, Math.cos(a) * s], noPickupUntil: g.time + 0.5 });
       it.bornAt = g.time;
     });
   }
 
   // ---- interaction ----------------------------------------------------------------------------------------------------------------------------------
-  /** Nearest interactable in reach and roughly in front. */
+  /** Nearest interactable in reach, in line of sight and roughly in front. Items the actor can actually take win ties. */
   findInteract(actor) {
     const fx = -Math.sin(actor.aimYaw), fz = -Math.cos(actor.aimYaw);
     let best = null, bestScore = 1e9;
     const px = actor.pos.x, py = actor.pos.y, pz = actor.pos.z;
-    const t = this.game.time;
+    const t = this.game.time, P = this.game.physics;
+    const ey = py + 1.1;
     for (const it of this.items) {
       if (!it.alive || t < it.noPickupUntil) continue;
       const dx = it.x - px, dz = it.z - pz, dy = it.y - py;
@@ -277,8 +282,11 @@ export class Loot {
       if (d2 > 2.5 * 2.5 || Math.abs(dy) > 2.4) continue;
       const d = Math.sqrt(d2);
       const facing = d > 0.3 ? (dx * fx + dz * fz) / d : 1;
-      const score = d - facing * 0.9;
-      if (score < bestScore) { bestScore = score; best = { type: 'loot', it }; }
+      const can = actor.inv.canTake(it.item);
+      const score = d - facing * 0.9 + (can.ok ? 0 : 20);
+      if (score >= bestScore) continue;
+      if (!P.lineClear(px, ey, pz, it.x, it.y + 0.45, it.z, LOS)) continue;
+      bestScore = score; best = { type: 'loot', it, ok: can.ok, swap: can.swap, reason: can.reason };
     }
     for (const c of this.chests) {
       if (c.opened) continue;
@@ -288,7 +296,9 @@ export class Loot {
       const d = Math.sqrt(d2);
       const facing = d > 0.3 ? (dx * fx + dz * fz) / d : 1;
       const score = d - facing * 0.9 - 0.5;
-      if (score < bestScore) { bestScore = score; best = { type: 'chest', c }; }
+      if (score >= bestScore) continue;
+      if (!P.lineClear(px, ey, pz, c.x, c.y + 0.4, c.z, LOS)) continue;
+      bestScore = score; best = { type: 'chest', c, ok: true };
     }
     return best;
   }
@@ -312,11 +322,11 @@ export class Loot {
     }
     // side effects of adding
     if (item.kind === 'weapon') {
-      if (res.dropped) this.drop(res.dropped, actor.pos.x, actor.pos.y, actor.pos.z, actor.vel);
+      if (res.dropped) this.drop(res.dropped, actor.pos.x, actor.pos.y, actor.pos.z, actor.vel, actor.aimYaw);
       if (actor.isPlayer && actor.inv.current?.kind === 'pickaxe') actor.inv.select(res.slot);
       else if (actor.isPlayer && res.dropped) actor.inv.select(res.slot);
     } else if (item.kind === 'consumable') {
-      if (res.dropped) this.drop(res.dropped, actor.pos.x, actor.pos.y, actor.pos.z, actor.vel);
+      if (res.dropped) this.drop(res.dropped, actor.pos.x, actor.pos.y, actor.pos.z, actor.vel, actor.aimYaw);
       item.count -= res.taken;
     } else if (item.kind === 'ammo') {
       item.count -= res.taken;
@@ -342,7 +352,10 @@ export class Loot {
     for (const it of this.items) {
       if (!it.alive || it.settled) continue;
       it.vy -= 16 * dt;
-      it.x += it.vx * dt; it.y += it.vy * dt; it.z += it.vz * dt;
+      const nx = it.x + it.vx * dt, nz = it.z + it.vz * dt;
+      if ((it.vx !== 0 || it.vz !== 0) && !phys.lineClear(it.x, it.y + 0.3, it.z, nx, it.y + 0.3, nz, LOS)) { it.vx *= -0.25; it.vz *= -0.25; }   // bounce off walls
+      else { it.x = nx; it.z = nz; }
+      it.y += it.vy * dt;
       const gr = phys.groundAt(it.x, it.z, it.y + 0.6).y;
       if (it.y < gr) {
         it.y = gr;

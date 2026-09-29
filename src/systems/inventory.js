@@ -73,6 +73,22 @@ export class Inventory {
     return this.mats[type] - before;
   }
 
+  /** Non-mutating preview of add(): {ok, swap (would replace the selected slot), reason}. */
+  canTake(item) {
+    if (item.kind === 'ammo') return this.ammo[item.id] < AMMO[item.id].cap ? { ok: true, swap: false } : { ok: false, swap: false, reason: 'Ammo full' };
+    if (item.kind === 'consumable') {
+      const si = this.findConsumable(item.id);
+      if (si >= 0) return this.slots[si].count < CONSUMABLES[item.id].stack ? { ok: true, swap: false } : { ok: false, swap: false, reason: 'Stack full' };
+    } else if (item.kind === 'weapon') {
+      for (let i = 1; i < SLOT_COUNT; i++) {
+        const s = this.slots[i];
+        if (s?.kind === 'weapon' && s.id === item.id && s.rarity === item.rarity) return { ok: false, swap: false, reason: 'Already carrying' };
+      }
+    }
+    if (this.freeSlot() >= 0) return { ok: true, swap: false };
+    return this.selected === 0 ? { ok: false, swap: false, reason: 'Inventory full' } : { ok: true, swap: true };
+  }
+
   /**
    * Try to add an item. Returns {ok, taken, dropped, slot, reason}.
    *  - weapons: identical (id+rarity) duplicates are declined; full inventory swaps with the selected slot.

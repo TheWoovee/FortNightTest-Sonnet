@@ -380,7 +380,8 @@ export function generateLandmark(env, lm) {
   if (lm.type === 'lighthouse') {
     P.lighthouse(ctx, lm.x, lm.z, y);
     out.outdoorSpots.push({ x: lm.x - 5.5, z: lm.z + 1.5, y: terrain.heightAt(lm.x - 5.5, lm.z + 1.5) }, { x: lm.x + 3, z: lm.z + 6, y: terrain.heightAt(lm.x + 3, lm.z + 6) });
-    out.chestSpots = [{ x: lm.x + 7, z: lm.z, y: y - 0.5 + 0.12, yaw: Math.PI / 2 }];
+    const cx = lm.x + 11.5;      // outside the base hut (which spans x+4.5 … x+9.5)
+    out.chestSpots = [{ x: cx, z: lm.z, y: terrain.heightAt(cx, lm.z) + 0.02, yaw: Math.PI / 2 }];
   }
   const mesh = solid.build(solidMaterial());
   mesh.castShadow = true; mesh.receiveShadow = true;
