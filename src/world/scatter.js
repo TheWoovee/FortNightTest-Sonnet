@@ -336,6 +336,16 @@ export class Scatter {
     this.rocks.push({ x, y: y - 0.25 * s, z, s, sy: rng.range(0.7, 1.25), rot: rng.range(0, 6.28), tint, hp: 40 + s * 35, maxHp: 40 + s * 35, alive: true, kind: 'rock' });
   }
 
+  /**
+   * Boulder collider: radius of the mesh's equator; tall enough that nobody can step *into* it (low stones and uphill sides
+   * of slopes would otherwise sit under the step-up tolerance and swallow the player).
+   */
+  _rockCollider(r) {
+    const rad = r.s * 0.94, dome = r.s * 0.9 * r.sy;
+    const top = r.y + Math.max(dome, 0.8) + rad * this.terrain.slopeAt(r.x, r.z);
+    return this.physics.addCylinder(r.x, r.z, rad, r.y - 0.4, top, { kind: 'rock', material: 'stone', owner: r, walkable: false });
+  }
+
   /** Create colliders, chunked instanced meshes and (optionally) paint ground shadows. */
   build() {
     const physics = this.physics;
@@ -352,7 +362,7 @@ export class Scatter {
       add(t.type, t);
     }
     for (const r of this.rocks) {
-      r.collider = physics.addCylinder(r.x, r.z, r.s * 0.82, r.y - 0.4, r.y + r.s * 1.0 * r.sy, { kind: 'rock', material: 'stone', owner: r, walkable: false });
+      r.collider = this._rockCollider(r);
       add('rock', r);
     }
     for (const b of this.bushes) add('bush', b);
@@ -436,7 +446,7 @@ export class Scatter {
       obj.mesh.instanceMatrix.needsUpdate = true;
       if (obj.meshLo) { obj.meshLo.setMatrixAt(obj.index, m); obj.meshLo.instanceMatrix.needsUpdate = true; }
       obj.collider = kind === 'rock'
-        ? this.physics.addCylinder(obj.x, obj.z, obj.s * 0.82, obj.y - 0.4, obj.y + obj.s * 1.0 * obj.sy, { kind: 'rock', material: 'stone', owner: obj, walkable: false })
+        ? this._rockCollider(obj)
         : this.physics.addCylinder(obj.x, obj.z, obj.type === 'palm' ? 0.3 : 0.42 * Math.max(1, obj.scale * 0.85), obj.y - 0.4, obj.y + 6 * obj.scale, { kind: 'tree', material: 'wood', owner: obj, walkable: false });
     };
     for (const t of this.trees) restore(t, 'tree');

@@ -43,6 +43,8 @@ export class Game {
     this.spectating = false;
     this.expectUnlock = false;
     this.viewActor = null;
+    this.victoryPending = false;
+    this.deathCounter = 0;
     this.frame = 0;
     this.fpsEma = 60;
     this.perfT = 0;
@@ -253,6 +255,8 @@ export class Game {
     this.storm?.reset(1);
     if (this.bus) { this.bus.active = false; this.bus.model.visible = false; }
     this.finished = false;
+    this.victoryPending = false;
+    this.deathCounter = 0;
     this.playerDead = false;
     this.playerDeadScreen = false;
     this.spectating = false;
@@ -304,6 +308,7 @@ export class Game {
     this.viewActor = p;
 
     // bots
+    this.poiLoad = new Map();
     const names = new Rng(seed).shuffle([...BOT_NAMES]);
     const N = clamp(S.bots, 1, 60);
     for (let i = 0; i < N; i++) {
@@ -370,6 +375,7 @@ export class Game {
     victim.stats.placement = this.aliveCount;
     victim.stats.survived = this.matchTime;
     this.aliveCount--;
+    victim.deathOrder = ++this.deathCounter;
     const killer = info.attacker && info.attacker !== victim ? info.attacker : null;
     if (killer) killer.stats.kills++;
     // loot drop
@@ -394,14 +400,19 @@ export class Game {
       this.camera.spectYaw = this.camera.yaw; this.camera.spectPitch = -0.3;
       this.camera.mode = 'spectate';
     }
-    this.checkVictory();
+    this.victoryPending = true;
   }
 
-  checkVictory() {
+  /** Called once per frame: deaths in the same frame (storm ticks, trades) are all in before anyone is declared the winner. */
+  resolveVictory() {
+    if (!this.victoryPending) return;
+    this.victoryPending = false;
     if (this.finished || this.phase !== 'match') return;
     if (this.aliveCount > 1) return;
     this.finished = true;
-    const winner = this.actors.find((a) => a.alive) || null;
+    // last one standing; if the final two fell together, whoever went down last takes it
+    let winner = this.actors.find((a) => a.alive) || null;
+    if (!winner) for (const a of this.actors) if (!winner || (a.deathOrder || 0) > (winner.deathOrder || 0)) winner = a;
     this.winner = winner;
     this.finishAt = this.time;
     if (winner?.isPlayer) {
@@ -558,6 +569,7 @@ export class Game {
     const inp = this.input;
     this.matchTime += dt;
     this.nav.queries = 0;
+    this.nav.update(this.time);
 
     // global keys
     if (inp.enabled && !this.playerDeadScreen) {
@@ -606,6 +618,7 @@ export class Game {
     this.updateIndoor(dt);
     this.gfx.post.uTime.value = this.time;
     this.updateLod();
+    this.resolveVictory();
     this.hud.update(dt);
     this.audio.updateAmbient(dt);
 
@@ -716,8 +729,10 @@ export class Game {
       if (a.mode === 'bus') { a.model.root.visible = false; continue; }
       const d = a.pos.distanceTo(cam);
       a.model.root.visible = true;
-      a.model.setDetail(d > 120 ? 1 : 0);
-      const shadow = d < 55;
+      const far = a._far ? d > 105 : d > 120;          // hysteresis: no flicker right at the boundary
+      a._far = far;
+      a.model.setDetail(far ? 1 : 0);
+      const shadow = a._shadow ? d < 64 : d < 55;
       if (a._shadow !== shadow) { a._shadow = shadow; a.model.setShadows(shadow); }
     }
   }
@@ -729,7 +744,8 @@ export class Game {
     else focus.set(cam.position.x, 0, cam.position.z);
     this.gfx.updateSun(focus);
     // underwater tint when the camera dips below the surface
-    this.gfx.post.uUnderwater.value = cam.position.y < 0.0 && this.terrain.heightAt(cam.position.x, cam.position.z) < cam.position.y ? 0.55 : 0;
+    const surface = this.terrain.waterLevelAt(cam.position.x, cam.position.z) ?? 0;
+    this.gfx.post.uUnderwater.value = cam.position.y < surface && this.terrain.heightAt(cam.position.x, cam.position.z) < cam.position.y ? 0.55 : 0;
     // flash for healing/damage handled in hud css
     this.gfx.render();
   }

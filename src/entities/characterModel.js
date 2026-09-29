@@ -138,10 +138,11 @@ const buildForeArm = (o, sleeve) => merge([
   colored(at(sphere(0.058, 8, 6), 0, -0.275, 0), o.glove ? o.accent : o.skin),
 ]);
 const buildThigh = (o) => merge([colored(at(capsule(0.076, 0.27, 3, 8), 0, -0.215, 0), o.pants, 0.12)]);
-const buildShin = (o) => merge([
-  colored(at(capsule(0.066, 0.26, 3, 8), 0, -0.215, 0), o.pants, 0.1),
-  colored(at(rbox(0.125, 0.105, 0.27, 0.04), 0, -0.4, -0.055), o.shoes, 0.15),
-  colored(at(rbox(0.13, 0.03, 0.28, 0.012), 0, -0.445, -0.055), 0xf5f5f5),
+const buildShin = (o) => merge([colored(at(capsule(0.066, 0.26, 3, 8), 0, -0.215, 0), o.pants, 0.1)]);
+// boot, modelled around the ankle pivot (0.065 m above the sole)
+const buildFoot = (o) => merge([
+  colored(at(rbox(0.125, 0.105, 0.27, 0.04), 0, -0.005, -0.055), o.shoes, 0.15),
+  colored(at(rbox(0.13, 0.03, 0.28, 0.012), 0, -0.05, -0.055), 0xf5f5f5),
 ]);
 
 function buildProxy(o) {
@@ -232,6 +233,29 @@ function solveArm(S, T, pole, a, b, upper, fore) {
 
 const ARM_UP = 0.29, ARM_FORE = 0.275;
 const HIP_H = 0.88, THIGH = 0.43;
+const SHIN_L = 0.395, ANKLE_H = 0.065;      // knee → ankle, ankle → sole
+
+const _gf = { z: 0, y: 0, pitch: 0 };
+/**
+ * Foot path for one leg at gait position c ∈ [0,1): the first half is stance (the foot travels from +S/2 to −S/2 relative to
+ * the hips at exactly the body's speed, i.e. it stays put on the ground); the second half is a lifted swing that leaves and
+ * lands moving backward at that same speed. z is forward of the hips, y the ankle-height offset, pitch the foot's absolute
+ * angle (toe up positive).
+ */
+function gaitFoot(c, S, lift, out) {
+  let z, y, pitch;
+  if (c < 0.5) {
+    z = S * (0.5 - 2 * c); y = 0;
+    pitch = -0.5 * smoothstep(0.36, 0.5, c);                 // heel rises for toe-off
+  } else {
+    const u = (c - 0.5) * 2, u2 = u * u, u3 = u2 * u;
+    z = S * (-4 * u3 + 6 * u2 - u - 0.5);
+    y = lift * Math.sin(Math.PI * u);
+    pitch = u < 0.65 ? lerp(-0.5, 0.28, smoothstep(0, 0.65, u)) : lerp(0.28, 0, smoothstep(0.65, 1, u));
+  }
+  out.z = z; out.y = y + 0.11 * Math.max(0, -Math.sin(pitch)); out.pitch = pitch;
+  return out;
+}
 
 // pose presets for holding weapons: holder position/rotation in spine space
 const HOLD = {
@@ -283,11 +307,15 @@ export class CharacterModel {
     // legs
     this.thigh = [new THREE.Group(), new THREE.Group()];
     this.shin = [new THREE.Group(), new THREE.Group()];
+    this.foot = [new THREE.Group(), new THREE.Group()];
     for (let i = 0; i < 2; i++) {
       this.thigh[i].position.set(i ? 0.1 : -0.1, 0, 0);
       this.thigh[i].add(mesh(buildThigh(o)));
       this.shin[i].position.y = -THIGH;
       this.shin[i].add(mesh(buildShin(o)));
+      this.foot[i].position.y = -SHIN_L;
+      this.foot[i].add(mesh(buildFoot(o)));
+      this.shin[i].add(this.foot[i]);
       this.thigh[i].add(this.shin[i]);
       this.hips.add(this.thigh[i]);
     }
@@ -384,35 +412,47 @@ export class CharacterModel {
     if (Math.abs(rel) > Math.PI / 2) { legYaw = rel > 0 ? rel - Math.PI : rel + Math.PI; dirSign = -1; }
     if (spd < 0.4) legYaw = 0;
     this.k.lean = damp(this.k.lean, legYaw, 10, dt);
-    this.phase += dt * spd * 3.0 * dirSign * (s.onGround || s.swim ? 1 : 0.2);
+    // Planted-foot gait: ankle targets from gaitFoot(), solved with a two-bone IK into thigh / knee / ankle angles, and the
+    // pelvis rides just low enough for the planted leg to reach (so nothing skates and nothing floats).
+    const crouchDrop = k.crouch * 0.3 + k.squat * 0.18;
+    const moveAmt = smoothstep(0.25, 0.9, spd);                        // 0 = standing pose, 1 = full stride
+    const stride = lerp(0.34, 0.72, clamp01(spd / 4.4)) * (1 + 0.24 * k.sprint) * (1 - 0.3 * k.crouch);   // stance travel per step (m)
+    const lift = lerp(0.08, 0.2, k.sprint) * (1 - 0.4 * k.crouch);
+    this.phase += dt * Math.PI * spd / Math.max(stride, 0.1) * dirSign * (s.onGround || s.swim ? 1 : 0.2);   // spd / (2·stride) cycles per second
     const ph = this.phase;
     const sw = Math.sin(ph), cw = Math.cos(ph);
     const runAmt = k.move * (1 - k.crouch * 0.4);
-    const A = lerp(0.42, 0.95, k.sprint) * runAmt;
-    const bend = lerp(0.35, 1.25, k.sprint) * runAmt;
 
     // ---- legs + hips (ground) ------------------------------------------------------------------------------------
     const hipsY0 = HIP_H;
-    const crouchDrop = k.crouch * 0.3 + k.squat * 0.18;
-    let hipY = hipsY0 - crouchDrop + Math.abs(Math.sin(ph)) * 0.035 * runAmt;
+    const hcap = hipsY0 - crouchDrop;                                  // pelvis height with the legs (nearly) straight
+    const cyc = ph / (Math.PI * 2) - 0.25, c1 = cyc - Math.floor(cyc);  // right leg starts its stance as sin(ph) peaks
+    const cs = c1 < 0.5 ? c1 : c1 - 0.5;                               // gait position of whichever leg is planted
+    const reachMax = (THIGH + SHIN_L) * 0.985;
+    const zs = gaitFoot(cs, stride, lift, _gf).z;
+    const hStance = ANKLE_H + Math.sqrt(Math.max(0.04, reachMax * reachMax - zs * zs));
+    const hipY = lerp(hcap, Math.min(hcap, hStance), moveAmt * (1 - k.air));
     const airSpread = k.air;
-    const squatTheta = Math.acos(clamp((hipsY0 - crouchDrop) / (2 * THIGH), 0, 1));
     for (let i = 0; i < 2; i++) {
       const side = i ? 1 : -1;
-      const p = i ? sw : -sw;              // opposite legs
-      const c = i ? cw : -cw;
-      let tx = p * A + squatTheta * 1.0;
-      let sx = -(0.06 + bend * Math.max(0, c) * 1.0) - squatTheta * 2.0 + (0.0);
-      // running knee lift uses the swing derivative sign; keep planted-leg straighter
-      tx += 0;
-      // airborne pose: one leg forward, one back
-      tx = lerp(tx, (i ? 0.55 : -0.25) + squatTheta * 0.5, airSpread * 0.85);
+      const cc = c1 + (i ? 0 : 0.5), c = cc - Math.floor(cc);
+      gaitFoot(c, stride, lift, _gf);
+      const fz = _gf.z * moveAmt, fy = _gf.y * moveAmt;
+      const dy = hipY - ANKLE_H - fy;
+      const r = Math.min(Math.hypot(fz, dy), (THIGH + SHIN_L) * 0.999);
+      const knee = Math.PI - Math.acos(clamp((THIGH * THIGH + SHIN_L * SHIN_L - r * r) / (2 * THIGH * SHIN_L), -1, 1));
+      const alpha = Math.acos(clamp((THIGH * THIGH + r * r - SHIN_L * SHIN_L) / (2 * THIGH * r), -1, 1));
+      let tx = Math.atan2(fz, dy) + alpha, sx = -knee;
+      // airborne pose: one leg forward, one back, toes pointed
+      tx = lerp(tx, i ? 0.55 : -0.25, airSpread * 0.85);
       sx = lerp(sx, i ? -0.6 : -1.1, airSpread * 0.85);
+      const pitchAbs = lerp(_gf.pitch * moveAmt, -0.3, airSpread * 0.85);
       this.thigh[i].rotation.set(tx, 0, side * 0.03 * (1 + k.crouch));
       this.shin[i].rotation.set(sx, 0, 0);
+      this.foot[i].rotation.set(pitchAbs - tx - sx, 0, 0);
     }
     this.hips.position.y = hipY;
-    this.hips.rotation.set(0, this.k.lean * (1 - k.fall - k.glide) * 0.9, Math.sin(ph) * 0.03 * runAmt);
+    this.hips.rotation.set(0, this.k.lean * (1 - k.fall - k.glide), Math.sin(ph) * 0.03 * runAmt);
     this.body.rotation.set(0, 0, 0);
     this.body.position.set(0, 0, 0);
 
@@ -565,6 +605,7 @@ export class CharacterModel {
         this.fore[i].quaternion.setFromEuler(new THREE.Euler(0.25, 0, 0));
         this.thigh[i].rotation.set(-0.35 + flap, 0, sgn * 0.42);
         this.shin[i].rotation.set(-0.5, 0, 0);
+        this.foot[i].rotation.set(0.45, 0, 0);
       }
       this.spine.rotation.set(0.25, 0, 0);
       this.holder.visible = false;
@@ -578,6 +619,7 @@ export class CharacterModel {
         solveArm(this.shoulderPos[i], tgt, i ? poleR : poleL, ARM_UP, ARM_FORE, this.shoulder[i], this.fore[i]);
         this.thigh[i].rotation.set(0.15 + i * 0.12, 0, sgn * 0.07);
         this.shin[i].rotation.set(-0.25 - i * 0.12, 0, 0);
+        this.foot[i].rotation.set(0.1, 0, 0);
       }
       this.spine.rotation.set(0.03, 0, 0);
       this.holder.visible = false;
@@ -596,6 +638,7 @@ export class CharacterModel {
         this.fore[i].quaternion.setFromEuler(new THREE.Euler(0.4 + Math.max(0, -a) * 0.5, 0, 0));
         this.thigh[i].rotation.set(Math.sin(stroke * 1.6 + i * Math.PI) * 0.35, 0, sgn * 0.06);
         this.shin[i].rotation.set(-0.25 - Math.max(0, Math.sin(stroke * 1.6 + i * Math.PI)) * 0.4, 0, 0);
+        this.foot[i].rotation.set(-0.5, 0, 0);
       }
       this.spine.rotation.set(0.35 + pitch * 0.2, 0, 0);
       this.hips.rotation.set(0, 0, 0);
@@ -611,6 +654,7 @@ export class CharacterModel {
         this.fore[i].quaternion.setFromEuler(new THREE.Euler(0.3, 0, 0));
         this.thigh[i].rotation.set(0.15 * e, 0, sgn * 0.25 * e);
         this.shin[i].rotation.set(-0.3 * e, 0, 0);
+        this.foot[i].rotation.set(0.2 * e, 0, 0);
       }
       this.holder.visible = false;
     } else {
@@ -640,6 +684,7 @@ export class CharacterModel {
         this.thigh[i].rotation.x = lerp(this.thigh[i].rotation.x, Math.sin(tt + ph) * 0.45, e);
         this.thigh[i].rotation.z = lerp(this.thigh[i].rotation.z, sgn * 0.12, e);
         this.shin[i].rotation.x = lerp(this.shin[i].rotation.x, -Math.abs(Math.sin(tt + ph)) * 0.7 - 0.1, e);
+        this.foot[i].rotation.x = lerp(this.foot[i].rotation.x, 0, e);
       }
       if (e > 0.4) this.holder.visible = false;
     }

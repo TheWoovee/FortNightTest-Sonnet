@@ -71,14 +71,32 @@ export function wallRun(ctx, F, axis, lo, hi, from, to, yb, yt, color, openings 
     else boxL(ctx, F, lo, hi, a0, a1, y0, y1, color, { mat: o.mat, ...o.box });
   };
   const ops = [...openings].sort((a, b) => a.c - b.c);
-  let cur = from;
+
+  // Solid wall = the whole run minus the UNION of all opening rectangles. (Emitting filler per opening walls up doors and
+  // paints windows onto solid wall as soon as openings of different storeys overlap in plan.)
+  const cutSet = new Set([from, to]);
+  for (const op of ops) { cutSet.add(Math.min(Math.max(op.c - op.w / 2, from), to)); cutSet.add(Math.min(Math.max(op.c + op.w / 2, from), to)); }
+  const cuts = [...cutSet].sort((a, b) => a - b);
+  const strips = [];
+  for (let i = 0; i < cuts.length - 1; i++) {
+    const a0 = cuts[i], a1 = cuts[i + 1];
+    if (a1 - a0 < 0.02) continue;
+    const mid = (a0 + a1) / 2;
+    const gaps = ops.filter((op) => mid > op.c - op.w / 2 && mid < op.c + op.w / 2).map((op) => [op.y0, op.y1]).sort((p, q) => p[0] - q[0]);
+    const solids = [];
+    let y = yb;
+    for (const [g0, g1] of gaps) { if (g0 > y + 0.01) solids.push([y, Math.min(g0, yt)]); y = Math.max(y, g1); }
+    if (y < yt - 0.01) solids.push([y, yt]);
+    const key = solids.map((q) => `${q[0].toFixed(3)}:${q[1].toFixed(3)}`).join('|');
+    const last = strips[strips.length - 1];
+    if (last && last.key === key && Math.abs(last.a1 - a0) < 1e-6) last.a1 = a1;      // merge neighbours with identical profiles
+    else strips.push({ a0, a1, solids, key });
+  }
+  for (const st of strips) for (const [y0, y1] of st.solids) emit(st.a0, st.a1, y0, y1);
+
+  // frames + glass
   for (const op of ops) {
     const a0 = op.c - op.w / 2, a1 = op.c + op.w / 2;
-    emit(cur, a0, yb, yt);
-    emit(a0, a1, yb, op.y0);
-    emit(a0, a1, op.y1, yt);
-    cur = a1;
-    // frame + glass
     const trim = o.trim ?? 0xffffff;
     const fw = 0.09, mid = (lo + hi) / 2;
     const f0 = lo - 0.04, f1 = hi + 0.04;
@@ -104,7 +122,6 @@ export function wallRun(ctx, F, axis, lo, hi, from, to, yb, yt, color, openings 
       ctx.glass.quad(q[0], q[1], q[2], q[3], 0xbfe6ff, [-1, 0, 0]);
     }
   }
-  emit(cur, to, yb, yt);
 }
 
 function distributeWindows(n, from, to, avoid, w) {
@@ -152,7 +169,7 @@ export function buildBlock(ctx, s) {
   const backOps = [], leftOps = [], rightOps = [];
   for (let lvl = 0; lvl < stories; lvl++) {
     for (const c of distributeWindows(wins.front, -halfW + t, halfW - t, lvl === 0 ? doorU : null, wm)) frontOps.push(mkWin(c, lvl));
-    for (const c of distributeWindows(wins.back, -halfW + t, halfW - t, null, wm)) backOps.push(mkWin(c, lvl));
+    for (const c of distributeWindows(wins.back, -halfW + t, halfW - t, lvl === 0 ? (s.backDoor ?? null) : null, wm)) backOps.push(mkWin(c, lvl));
     for (const c of distributeWindows(wins.left, t, s.d - t, null, wm)) leftOps.push(mkWin(c, lvl));
     for (const c of distributeWindows(wins.right, t, s.d - t, null, wm)) rightOps.push(mkWin(c, lvl));
   }
@@ -223,7 +240,7 @@ export function buildBlock(ctx, s) {
     }
     // banister
     boxL(ctx, F, holeU1 - 0.04, holeU1 + 0.04, holeV0, s.d - t, fy + 0.05, fy + 0.95, 0x8a5a2b, { collide: false });
-    stairs = { fy };
+    stairs = { fy, holeU1, holeV0 };
   }
 
   // roof
@@ -239,12 +256,12 @@ export function buildBlock(ctx, s) {
     // colliders: two sloped slabs
     if (ridgeWorld === 'x') {
       const zc = (fp.minZ + fp.maxZ) / 2;
-      ctx.physics.addRamp(fp.minX - go, fp.maxX + go, fp.minZ - oh, zc, top - drop - 0.3, top - drop, top + rise, 'z', 1, { kind: 'building', material: 'wood' });
-      ctx.physics.addRamp(fp.minX - go, fp.maxX + go, zc, fp.maxZ + oh, top - drop - 0.3, top - drop, top + rise, 'z', -1, { kind: 'building', material: 'wood' });
+      ctx.physics.addRamp(fp.minX - go, fp.maxX + go, fp.minZ - oh, zc, top - 0.16, top - drop, top + rise, 'z', 1, { kind: 'building', material: 'wood' });
+      ctx.physics.addRamp(fp.minX - go, fp.maxX + go, zc, fp.maxZ + oh, top - 0.16, top - drop, top + rise, 'z', -1, { kind: 'building', material: 'wood' });
     } else {
       const xc = (fp.minX + fp.maxX) / 2;
-      ctx.physics.addRamp(fp.minX - oh, xc, fp.minZ - go, fp.maxZ + go, top - drop - 0.3, top - drop, top + rise, 'x', 1, { kind: 'building', material: 'wood' });
-      ctx.physics.addRamp(xc, fp.maxX + oh, fp.minZ - go, fp.maxZ + go, top - drop - 0.3, top - drop, top + rise, 'x', -1, { kind: 'building', material: 'wood' });
+      ctx.physics.addRamp(fp.minX - oh, xc, fp.minZ - go, fp.maxZ + go, top - 0.16, top - drop, top + rise, 'x', 1, { kind: 'building', material: 'wood' });
+      ctx.physics.addRamp(xc, fp.maxX + oh, fp.minZ - go, fp.maxZ + go, top - 0.16, top - drop, top + rise, 'x', -1, { kind: 'building', material: 'wood' });
     }
     s._rise = rise;
     // ridge cap
@@ -276,7 +293,7 @@ export function buildBlock(ctx, s) {
     const axis = F.axisOf('v');
     const pa = F.map(0, -oh), pb = F.map(0, s.d + oh);
     const dirPos = axis === 'x' ? pb[0] > pa[0] : pb[1] > pa[1];
-    ctx.physics.addRamp(rr.minX, rr.maxX, rr.minZ, rr.maxZ, top - 0.3, top - 0.1, top + rise, axis, dirPos ? 1 : -1, { kind: 'building', material: 'metal' });
+    ctx.physics.addRamp(rr.minX, rr.maxX, rr.minZ, rr.maxZ, top - 0.16, top - 0.1, top + rise, axis, dirPos ? 1 : -1, { kind: 'building', material: 'metal' });
     // fill the triangular side walls
     for (const sgn of [-1, 1]) {
       const u = sgn * halfW;
@@ -305,6 +322,11 @@ export function buildBlock(ctx, s) {
   }
   if (s.bigDoor) {
     boxL(ctx, F, doorU - s.bigDoor.w / 2 - 1.0, doorU + s.bigDoor.w / 2 + 1.0, -1.6, 0, floorY - 0.1, floorY + 0.1, 0xb9b9be, { walkable: true, mat: 'stone', dark: 0.9 });
+  } else {
+    // on sloping ground the first step can sit higher than a character can step: keep adding steps down toward the lowest ground
+    const gMin = s.groundMin ?? floorY, top0 = floorY - 0.02, outer = s.porch ? -(s.porchD ?? 1.7) - 0.55 : -1.7;
+    const extra = Math.min(3, Math.max(0, Math.ceil((top0 - gMin - 0.45) / 0.34)));
+    for (let k = 1; k <= extra; k++) boxL(ctx, F, doorU - 0.9, doorU + 0.9, outer - 0.55 * k, outer - 0.55 * (k - 1), gMin - 0.3, top0 - 0.34 * k, 0xa9a9ad, { walkable: true, mat: 'stone', dark: 0.9 });
   }
 
   // chimney
@@ -410,10 +432,11 @@ export function buildBlock(ctx, s) {
     addProp(halfW - t - 2.4, halfW - t - 0.1, 0.7, 2.6, 1.0, 0x8a5a2b);
   }
 
-  // loot spots on a coarse grid, skipping props
+  // loot spots on a coarse grid, skipping props (kept ~0.8 m clear of the walls so they are always reachable)
+  const spotIn = { u0: -halfW + t + 0.8, u1: halfW - t - 0.8, v0: t + 0.9, v1: s.d - t - 0.8 };
   const cand = [];
   for (let iu = 0; iu <= 4; iu++) for (let iv = 0; iv <= 4; iv++) {
-    cand.push([inner.u0 + (iu / 4) * (inner.u1 - inner.u0), inner.v0 + (iv / 4) * (inner.v1 - inner.v0)]);
+    cand.push([spotIn.u0 + (iu / 4) * (spotIn.u1 - spotIn.u0), spotIn.v0 + (iv / 4) * (spotIn.v1 - spotIn.v0)]);
   }
   rng.shuffle(cand);
   const free = (u, v) => !props.some((p) => u > p.u0 - 0.5 && u < p.u1 + 0.5 && v > p.v0 - 0.5 && v < p.v1 + 0.5) && !(Math.abs(u - doorU) < 1.3 && v < 1.8);
@@ -447,6 +470,11 @@ export function buildBlock(ctx, s) {
   const [dx0, dz0] = F.map(doorU, -1.6);
   const [dx1, dz1] = F.map(doorU, 1.4);
   const nav = { doorOut: { x: dx0, z: dz0 }, doorIn: { x: dx1, z: dz1 } };
+  if (stairs) {
+    // scripted way down for bots that end up on the upper floor: beside the top of the stair well → onto the flight → foot of the stairs
+    const P = (u, v) => { const [x, z] = F.map(u, v); return { x, z }; };
+    nav.stairs = { top: P(stairs.holeU1 + 0.7, s.d - t - 0.9), step: P(stairs.holeU1 - 0.45, s.d - t - 0.9), bottom: P((-halfW + t + stairs.holeU1) / 2, stairs.holeV0 - 1.1), fy: stairs.fy };
+  }
   if (s.bigDoor) {
     const [ox, oz] = F.map(doorU, -2.6); nav.doorOut = { x: ox, z: oz };
     const [ix, iz] = F.map(doorU, 2.4); nav.doorIn = { x: ix, z: iz };

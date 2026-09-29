@@ -95,7 +95,10 @@ export function windmill(ctx, x, z, y, rng) {
   ctx.solid.cone(x, y + h, z, 2.3, 2.6, 10, cap);
   // door + windows
   ctx.solid.box(x - 0.6, y - 0.1, z + 2.95, x + 0.6, y + 2.0, z + 3.35, 0x7a4a26, { dark: 1 });
-  ctx.physics.addCylinder(x, z, 3.0, y - 0.4, y + h, { kind: 'prop', material: 'wood', walkable: false });
+  // the tower tapers from r 3.2 to 1.9: stack three cylinders so the glider isn't stopped by empty air near the cap
+  for (const [r, y0, y1] of [[2.95, -0.4, 3.5], [2.5, 3.5, 8], [2.1, 8, h]]) {
+    ctx.physics.addCylinder(x, z, r, y + y0, y + y1, { kind: 'prop', material: 'wood', walkable: false });
+  }
   // blades group (rotates)
   const b = new GeoBuilder();
   const bladeC = 0xf5f0e6, frameC = 0x8a5a2b;
@@ -226,7 +229,10 @@ export function fountain(ctx, x, z, y) {
 
 export function tent(ctx, x, z, y, color) {
   ctx.solid.pyramid(x - 1.6, z - 1.6, x + 1.6, z + 1.6, y, 2.0, color);
-  ctx.physics.addCylinder(x, z, 1.5, y, y + 1.4, { kind: 'prop', material: 'wood' });
+  // three square tiers hugging the pyramid instead of one fat cylinder that blocked empty air
+  for (const [w, y0, y1] of [[1.3, 0, 0.6], [0.9, 0.6, 1.2], [0.45, 1.2, 1.75]]) {
+    ctx.physics.addBox(x - w, x + w, z - w, z + w, y + y0, y + y1, { kind: 'prop', material: 'wood', walkable: false });
+  }
 }
 
 export function signPost(ctx, x, z, y, color = 0xffd23f) {

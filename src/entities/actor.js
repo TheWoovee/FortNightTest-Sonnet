@@ -7,6 +7,7 @@ import { WeaponController } from './weaponController.js';
 import { clamp, clamp01, damp, dampAngle, angleDiff, approach, lerp } from '../util/math.js';
 
 const INF = 1e9;
+const _tn = [0, 1, 0];
 let _nextId = 1;
 
 export class Actor {
@@ -144,6 +145,15 @@ export class Actor {
     if (wc.using) speed *= 0.55;
     if (this.swimming) speed *= 0.55;
     if (fwdDot < -0.25) speed *= 0.8;         // backpedal slower
+    // steep bare ground: the climb slows from ~26° and all but stops on cliff faces (≈57°)
+    if (this.onGround && !this.swimming && !this.groundCollider && inLen > 0) {
+      const n = terrain.normalAt(this.pos.x, this.pos.z, _tn);
+      const hl = Math.hypot(n[0], n[2]);
+      if (n[1] < 0.9 && hl > 1e-4) {
+        const uphill = -(mx * n[0] + mz * n[2]) / hl;
+        if (uphill > 0) speed *= 1 - clamp01((Math.acos(n[1]) - 0.45) / 0.55) * uphill * 0.88;
+      }
+    }
     const tx = mx * speed * inLen, tz = mz * speed * inLen;
     const accel = (this.onGround || this.swimming ? P.groundAccel : P.airAccel) * (inLen > 0 ? 1 : 1.25);
     // approach as a vector so diagonal accel is isotropic
@@ -229,6 +239,18 @@ export class Actor {
     }
   }
 
+  /** Integrate an airborne move in short hops so thin walls can't be skipped; the glider bounces off buildings and trees and stays over the map. */
+  _airMove(dt, radius, height) {
+    const phys = g_phys(this);
+    const n = clamp(Math.ceil(this.vel.length() * dt / 0.3), 1, 8);
+    const h = dt / n, lim = WORLD.half - 6;
+    for (let i = 0; i < n; i++) {
+      this.pos.addScaledVector(this.vel, h);
+      phys.depenetrate(this.pos, radius, height, 0.3);
+    }
+    this.pos.x = clamp(this.pos.x, -lim, lim); this.pos.z = clamp(this.pos.z, -lim, lim);
+  }
+
   _freefall(dt) {
     const I = this.intent, phys = g_phys(this), terrain = this.game.terrain;
     this.freefallT += dt;
@@ -241,7 +263,7 @@ export class Actor {
     this.vel.x += (fx * hs - this.vel.x) * k;
     this.vel.z += (fz * hs - this.vel.z) * k;
     this.vel.y += (vs - this.vel.y) * (1 - Math.exp(-2.2 * dt));
-    this.pos.addScaledVector(this.vel, dt);
+    this._airMove(dt, 0.5, 1.4);
     const gy = Math.max(phys.groundAt(this.pos.x, this.pos.z, this.pos.y + 2).y, 0);
     const alt = this.pos.y - gy;
     if ((I.glide && this.freefallT > 0.8) || alt < MATCH.glideOpenAltitude) {
@@ -261,9 +283,7 @@ export class Actor {
     this.vel.x += (fx * hs - this.vel.x) * k;
     this.vel.z += (fz * hs - this.vel.z) * k;
     this.vel.y += (vs - this.vel.y) * k;
-    this.pos.addScaledVector(this.vel, dt);
-    const lim = WORLD.half - 6;
-    this.pos.x = clamp(this.pos.x, -lim, lim); this.pos.z = clamp(this.pos.z, -lim, lim);
+    this._airMove(dt, this.radius, PLAYER.height);
     const gr = phys.groundAt(this.pos.x, this.pos.z, this.pos.y + 1.2);
     const gy = gr.y;
     const wl = this.game.terrain.waterLevelAt(this.pos.x, this.pos.z);

@@ -10,6 +10,7 @@ import { Rng } from '../util/rng.js';
 import { clamp, clamp01, angleDiff, dampAngle, damp, lerp } from '../util/math.js';
 
 const TAU = Math.PI * 2;
+const LEVEL = 2.2;            // vertical reach for loot: choosing, keeping and picking up must all agree (a mismatch parked bots on roofs)
 const yawTo = (ax, az, bx, bz) => Math.atan2(-(bx - ax), -(bz - az));
 const _v = new THREE.Vector3();
 const _p = { x: 0, y: 0, z: 0 };
@@ -61,6 +62,9 @@ export class Bot extends Actor {
     this.wpX = 0; this.wpZ = 0; this.wpSet = -9; this.wdT = 0; this.wdFail = 0; this.wdD = 0; this.wdX = 0; this.wdZ = 0;   // progress watchdog
     this.ignore = new Map();          // loot objects this bot has given up on → time until it may try again
     this.elevated = false;            // standing on a roof / platform well above the ground
+    this.idleRef = new THREE.Vector3(); this.idleT = 0;      // whole-bot idle watchdog (independent of what the bot is trying to do)
+    this.descendIdx = 0; this.descendB = null; this.idleN = 0; this.landT = null;
+    this.bold = 0.75 + rng.float() * 0.6;                       // how readily this bot picks fights
     this.scanCd = rng.float();
     this.sprintMode = true;
     this.inv.mats.wood = 60 + Math.floor(rng.float() * 240);
@@ -74,13 +78,25 @@ export class Bot extends Actor {
   planDrop() {
     const g = this.game, rng = this.rng, T = g.terrain;
     const towns = T.layout.towns;
-    // weighted POI choice; the biggest town is the hot drop
-    const wts = towns.map((t) => [t, (t.big ? 3.2 : 1.4) * (0.5 + rng.float())]);
-    let tgt;
-    if (rng.chance(0.18)) {
-      const a = rng.range(0, TAU), r = Math.sqrt(rng.float()) * 340;
-      tgt = { x: Math.cos(a) * r, z: Math.sin(a) * r, pad: 20 };
-    } else tgt = rng.weighted(wts);
+    // POIs fill up: the hot drop takes a handful of bots, everyone else spreads out (an unbroken pile of bots per POI meant whole
+    // clusters wiped each other out inside a minute)
+    const load = g.poiLoad || (g.poiLoad = new Map());
+    const cap = (t) => (t.big ? 5 : 3);
+    const open = towns.filter((t) => (load.get(t.id) || 0) < cap(t));
+    let tgt = null;
+    if (open.length && rng.chance(0.72)) {
+      tgt = rng.weighted(open.map((t) => [t, (t.big ? 2.6 : 1.4) * (0.5 + rng.float())]));
+      load.set(tgt.id, (load.get(tgt.id) || 0) + 1);
+    }
+    if (!tgt) {
+      // a random dry spot on the island
+      for (let k = 0; k < 8 && !tgt; k++) {
+        const a = rng.range(0, TAU), r = Math.sqrt(rng.float()) * 360;
+        const x = Math.cos(a) * r, z = Math.sin(a) * r;
+        if (T.heightAt(x, z) > 2.5) tgt = { x, z, pad: 20 };
+      }
+      tgt = tgt || { x: 0, z: 0, pad: 40 };
+    }
     const a = rng.range(0, TAU), r = Math.sqrt(rng.float()) * (tgt.pad || 30) * 0.7;
     this.dropTarget = { x: tgt.x + Math.cos(a) * r, z: tgt.z + Math.sin(a) * r };
     const { s, perp } = g.bus.approach(this.dropTarget.x, this.dropTarget.z);
@@ -161,7 +177,17 @@ export class Bot extends Actor {
     const outside = storm.active && storm.isOutside(this.pos.x, this.pos.z);
 
     if (outside && !this.enemyVisible) { this.state = 'storm'; return; }
-    if (this.enemyVisible && this.hasUsableWeapon()) {
+    // no usable weapon: don't stand there trading shots with nothing — run for it (and throw up a wall when there is time)
+    if (this.state === 'flee') {
+      if (this.enemyVisible || t - this.lastSeen.t < 3) return;
+      this.state = 'loot'; this.lootTarget = null;
+    }
+    if (this.enemyVisible && !this.hasUsableWeapon()) { this.state = 'flee'; this.wc.cancelUse(); return; }
+    // fights are picked: within a range set by nerve and weapon (snipers reach far), or when we're being shot / already committed
+    const dEnemy = this.enemy ? Math.hypot(this.enemy.pos.x - this.pos.x, this.enemy.pos.z - this.pos.z) : 1e9;
+    const engageR = (this.hasSniper() ? 175 : 58 + this.skill * 30) * this.bold * this.D.view;
+    const hurtRecently = t - this.lastDamageTime < 4;
+    if (this.enemyVisible && this.hasUsableWeapon() && (this.state === 'combat' || dEnemy < engageR || hurtRecently)) {
       if (this.state !== 'combat') { this.reactT = Math.max(0.12, 0.28 + (1 - this.skill) * 0.55 + this.D.react); this.strafeT = 0; }
       this.state = 'combat';
       this.wc.cancelUse();
@@ -197,7 +223,7 @@ export class Bot extends Actor {
     }
     if (!this.inv.hasWeapon() && this.state === 'roam' && g.time < this.lootPhaseUntil + 60) this.state = 'loot';
     if (this.alert && this.state === 'roam' && t - this.alert.t < 8 && !this.enemyVisible) {
-      this.roamTarget = { x: this.alert.x + this.rng.range(-8, 8), z: this.alert.z + this.rng.range(-8, 8) };
+      this.roamTarget = { x: this.alert.x + this.rng.range(-16, 16), z: this.alert.z + this.rng.range(-16, 16) };
       this.roamT = 6;
     }
     this.equipBest();
@@ -207,6 +233,14 @@ export class Bot extends Actor {
     for (let i = 1; i < 6; i++) {
       const s = this.inv.slots[i];
       if (s?.kind === 'weapon' && (s.mag > 0 || this.inv.ammo[WEAPONS[s.id].ammo] > 0)) return true;
+    }
+    return false;
+  }
+
+  hasSniper() {
+    for (let i = 1; i < 6; i++) {
+      const s = this.inv.slots[i];
+      if (s?.kind === 'weapon' && s.id === 'sniper' && (s.mag > 0 || this.inv.ammo.heavy > 0)) return true;
     }
     return false;
   }
@@ -223,8 +257,8 @@ export class Bot extends Actor {
     const t = g.time;
     const myEye = this.eyePos(_v);
     const cur = this.inv.current;
-    const sniper = cur?.kind === 'weapon' && cur.id === 'sniper';
-    const range = (sniper ? 240 : 115) * this.D.view;
+    const sniper = this.hasSniper();
+    const range = (sniper ? 240 : 110) * this.D.view;
     let best = null, bestScore = 1e9;
     let tests = 0;
     const fx = -Math.sin(this.aimYaw), fz = -Math.cos(this.aimYaw);
@@ -258,11 +292,11 @@ export class Bot extends Actor {
 
   hear(pos, source) {
     if (this.enemyVisible || source === this) return;
-    this.alert = { x: pos.x, z: pos.z, t: this.game.time, src: source };
+    this.alert = { x: pos.x + this.rng.range(-14, 14), z: pos.z + this.rng.range(-14, 14), t: this.game.time, src: source };     // sound isn't a GPS fix
     // sometimes react immediately to a close shooter
     if (this.state === 'roam' || this.state === 'loot') {
       const d = Math.hypot(pos.x - this.pos.x, pos.z - this.pos.z);
-      if (d < 60 && this.rng.chance(0.55 * this.D.aggr) && this.inv.hasWeapon()) { this.roamTarget = { x: pos.x, z: pos.z }; this.roamT = 8; if (this.state === 'loot' && this.lootTarget && this.rng.chance(0.5)) { this.lootTarget = null; this.state = 'roam'; } }
+      if (d < 45 && this.rng.chance(0.3 * this.D.aggr * this.bold) && this.inv.hasWeapon()) { this.roamTarget = { x: pos.x, z: pos.z }; this.roamT = 8; if (this.state === 'loot' && this.lootTarget && this.rng.chance(0.5)) { this.lootTarget = null; this.state = 'roam'; } }
     }
   }
 
@@ -271,7 +305,7 @@ export class Bot extends Actor {
     const t = this.lootTarget;
     if (!t) return false;
     const ty = t.type === 'chest' ? t.c.y : t.it.y;
-    if (this.onGround && Math.abs(ty - this.pos.y) > 3.2) return false;        // e.g. we landed on the roof above it
+    if (this.onGround && Math.abs(ty - this.pos.y) > LEVEL) return false;      // e.g. we landed on the roof above it
     if (t.type === 'chest') return !t.c.opened;
     return t.it.alive;
   }
@@ -286,7 +320,7 @@ export class Bot extends Actor {
       if (it.floorLevel > 0 && Math.abs(it.y - py) > 1.5) continue;
       const dx = it.x - px, dz = it.z - pz;
       const d = Math.hypot(dx, dz);
-      if (d > maxDist || Math.abs(it.y - py) > 4) continue;
+      if (d > maxDist || Math.abs(it.y - py) > LEVEL) continue;
       const v = this.valueOf(it.item, hasW);
       if (v <= 0) continue;
       const score = v * 10 / (d + 6);
@@ -294,7 +328,7 @@ export class Bot extends Actor {
     }
     if (!hasW || this.inv.weaponCount() < 2) {
       for (const c of L.chests) {
-        if (c.opened || this.ignore.get(c) > g.time || Math.abs(c.y - py) > 3.2) continue;
+        if (c.opened || this.ignore.get(c) > g.time || Math.abs(c.y - py) > LEVEL) continue;
         const d = Math.hypot(c.x - px, c.z - pz);
         if (d > maxDist) continue;
         const score = 95 * 10 / (d + 6);
@@ -353,18 +387,24 @@ export class Bot extends Actor {
     if (stale && g.time >= this.pathRetryAt && Math.hypot(gx - this.pos.x, gz - this.pos.z) > stop + 0.5) this.computePath(gx, gz);
     if (this.path) {
       let node = this.path[this.pathIdx];
-      while (node && Math.hypot(node.x - this.pos.x, node.z - this.pos.z) < (node.last ? stop : 1.0)) node = this.path[++this.pathIdx];
+      while (node && Math.hypot(node.x - this.pos.x, node.z - this.pos.z) < (node.last ? stop : node.door ? 0.4 : 0.6)) node = this.path[++this.pathIdx];
       if (node) {
-        this.moveTo(node.x, node.z, { ...opts, stop: node.last ? stop : 0.3 });
+        this.moveTo(node.x, node.z, { ...opts, stop: node.last ? stop : 0.25, direct: true });
         return Math.hypot(gx - this.pos.x, gz - this.pos.z);
       }
       this.path = null;         // leg finished
     }
-    return this.moveTo(gx, gz, { ...opts, stop });      // no route (yet): steer directly, the watchdog will give up if it goes nowhere
+    return this.moveTo(gx, gz, { ...opts, stop });      // no route (yet): steer with local avoidance; the watchdogs give up if it goes nowhere
   }
 
   /** No meaningful progress toward the current waypoint for several seconds. */
   noProgress() {
+    const I = this.intent, g = this.game;
+    const l = Math.hypot(I.moveX, I.moveZ);
+    if (l > 0.1 && this.onGround) {
+      // whatever is right in front of us is in the way for this bot: tell the nav grid (expires after a while)
+      for (const k of [0.9, 1.5]) g.nav.learnBlock(this.pos.x + (I.moveX / l) * k, this.pos.z + (I.moveZ / l) * k, g.time + 60);
+    }
     this.path = null; this.pathRetryAt = 0;
     this.unstick = 1.0; this.unstickDir = this.rng.chance(0.5) ? 1 : -1; this.wantJump = 0.5;
     if (++this.giveUp >= 3) { this.giveUp = 0; this.abandonTarget(); }
@@ -395,10 +435,10 @@ export class Bot extends Actor {
     // inside/near the next safe zone
     let x, z;
     const mode = rng.float();
-    if (mode < 0.35 * this.D.aggr && g.player.alive && g.player.mode === 'ground') {
+    if ((mode < 0.35 * this.D.aggr || g.aliveCount <= 5) && g.player.alive && g.player.mode === 'ground') {
       const p = g.player;
       const d = Math.hypot(p.pos.x - this.pos.x, p.pos.z - this.pos.z);
-      if (d < 220) { x = p.pos.x + rng.range(-25, 25); z = p.pos.z + rng.range(-25, 25); }
+      if (d < 220 || g.aliveCount <= 5) { x = p.pos.x + rng.range(-25, 25); z = p.pos.z + rng.range(-25, 25); }
     }
     if (x === undefined) {
       if (mode < 0.65) {
@@ -433,6 +473,7 @@ export class Bot extends Actor {
       else if (W.id === 'ar') sc += dist > 20 && dist < 120 ? 30 : 8;
       else if (W.id === 'pistol') sc += dist < 20 ? 8 : -10;
       if (s.mag <= 0) sc -= 25;
+      if (i === this.inv.selected) sc += 8;              // hysteresis: no smg <-> ar flip-flopping around 20-25 m
       if (sc > bs) { bs = sc; best = i; }
     }
     return best;
@@ -448,15 +489,21 @@ export class Bot extends Actor {
   act(dt) {
     const g = this.game, I = this.intent, t = g.time;
     const cur = this.inv.current;
+    this._dt = dt;
     this.unstick = Math.max(0, this.unstick - dt);
 
-    switch (this.state) {
-      case 'combat': this.actCombat(dt); break;
-      case 'hunt': this.actHunt(dt); break;
-      case 'heal': this.actHeal(dt); break;
-      case 'storm': this.actStorm(dt); break;
-      case 'loot': this.actLoot(dt); break;
-      default: this.actRoam(dt); break;
+    if (this.swimming) this.actSwim(dt);                              // out at sea: make for the nearest beach, whatever we were doing
+    else if ((this.elevated || this.descendB) && this.descend(dt)) { /* upper floor: taking the stairs */ }
+    else {
+      switch (this.state) {
+        case 'combat': this.actCombat(dt); break;
+        case 'hunt': this.actHunt(dt); break;
+        case 'heal': this.actHeal(dt); break;
+        case 'storm': this.actStorm(dt); break;
+        case 'flee': this.actFlee(dt); break;
+        case 'loot': this.actLoot(dt); break;
+        default: this.actRoam(dt); break;
+      }
     }
 
     // Stuck handling runs after the state has set this frame's intent (brain() clears it beforehand, so checking earlier
@@ -485,6 +532,16 @@ export class Bot extends Actor {
       this.wdX = this.wpX; this.wdZ = this.wpZ;
     }
 
+    // whole-bot idle watchdog: an on-the-move state that hasn't moved us 1.5 m in 8 s means the plan is broken, whatever the cause
+    this.idleT += dt;
+    if (this.idleT >= 1) {
+      this.idleT = 0;
+      if (Math.hypot(this.pos.x - this.idleRef.x, this.pos.z - this.idleRef.z) > 1.5 || Math.abs(this.pos.y - this.idleRef.y) > 1) { this.idleRef.copy(this.pos); this.idleN = 0; }
+      else if (++this.idleN >= 8) {
+        this.idleN = 0;
+        if (this.state !== 'heal' && this.state !== 'combat' && !this.wc.using && (!g.storm.active || g.storm.current.r > 20)) { this.abandonTarget(); this.noProgress(); }
+      }
+    }
     if (this.wantJump > 0) { this.wantJump -= dt; I.jump = true; I.jumpPressed = true; }
     // spare time: reload when nothing is going on
     if (this.state !== 'combat' && cur?.kind === 'weapon') {
@@ -514,7 +571,10 @@ export class Bot extends Actor {
       return 'ok';
     };
     let res = probe(ang, 1.5);
-    if (res !== 'ok') {
+    if (res !== 'ok' && opts.direct) {
+      // following a checked route: only hop low obstacles, don't second-guess the path (probe deflection pushed bots back out of doors)
+      if (res === 'blocked' && this.onGround && !phys.overlaps(this.pos.x + Math.cos(ang) * 1.5, this.pos.y + 1.05, this.pos.z + Math.sin(ang) * 1.5, this.radius * 0.95, this.height, 0.5)) this.wantJump = Math.max(this.wantJump, 0.25);
+    } else if (res !== 'ok') {
       // can we hop it?
       if (res === 'blocked' && !phys.overlaps(this.pos.x + Math.cos(ang) * 1.5, this.pos.y + 1.05, this.pos.z + Math.sin(ang) * 1.5, this.radius * 0.95, this.height, 0.5) && this.onGround) {
         this.wantJump = Math.max(this.wantJump, 0.25);
@@ -528,7 +588,7 @@ export class Bot extends Actor {
         if (!found) ang += this.avoidDir * 2.2;
       }
     }
-    this.avoidT = Math.max(0, this.avoidT - 0.016);
+    this.avoidT = Math.max(0, this.avoidT - (this._dt || 0.016));
     if (this.unstick > 0) ang += this.unstickDir * 1.6;
     I.moveX = Math.cos(ang) * (opts.speed ?? 1);
     I.moveZ = Math.sin(ang) * (opts.speed ?? 1);
@@ -543,7 +603,8 @@ export class Bot extends Actor {
   actRoam(dt) {
     const I = this.intent, g = this.game;
     this.roamT -= dt;
-    if (!this.roamTarget || this.roamT <= 0 || Math.hypot(this.roamTarget.x - this.pos.x, this.roamTarget.z - this.pos.z) < 5) this.pickRoamTarget();
+    const arrive = Math.min(5, 1.2 + (g.storm.active ? g.storm.current.r : 999) * 0.3);
+    if (!this.roamTarget || this.roamT <= 0 || Math.hypot(this.roamTarget.x - this.pos.x, this.roamTarget.z - this.pos.z) < arrive) this.pickRoamTarget();
     const d = this.followGoal(this.roamTarget.x, this.roamTarget.z, { stop: 3 });
     if (this.noRoute >= 2) { this.noRoute = 0; this.roamTarget = null; this.roamT = 0; }     // unreachable: pick another spot
     I.sprint = d > 14;
@@ -571,7 +632,7 @@ export class Bot extends Actor {
     I.sprint = d > 10;
     this.faceMove(dt);
     const dd = Math.hypot(tx - this.pos.x, tz - this.pos.z);
-    if (dd < 1.6 && Math.abs((tgt.type === 'chest' ? tgt.c.y : tgt.it.y) - this.pos.y) < 2.2) {
+    if (dd < 1.6 && Math.abs((tgt.type === 'chest' ? tgt.c.y : tgt.it.y) - this.pos.y) <= LEVEL) {
       if (tgt.type === 'chest') g.loot.openChest(tgt.c, this);
       else {
         const ok = g.loot.pickup(this, tgt.it);
@@ -621,6 +682,76 @@ export class Bot extends Actor {
     if (this.wc.using) this.wc.cancelUse();
   }
 
+  /** Upper floor of a house: walk to the stairs and down. Returns true while it is in charge (it keeps control through hops and falls). */
+  descend(dt) {
+    const g = this.game, p = this.pos;
+    let b = this.descendB;
+    if (!b) {
+      if (!this.elevated) return false;
+      for (const q of g.world.buildings) {
+        const f = q.foot;
+        if (q.nav.stairs && p.x > f.minX && p.x < f.maxX && p.z > f.minZ && p.z < f.maxZ && p.y > q.floorY + LEVEL && p.y < q.top - 0.3) { b = q; break; }
+      }
+      if (!b) return false;
+      this.descendB = b; this.descendIdx = 0;
+    }
+    if (p.y < b.floorY + 1.0 || Math.hypot(p.x - (b.foot.minX + b.foot.maxX) / 2, p.z - (b.foot.minZ + b.foot.maxZ) / 2) > 14) { this.descendB = null; this.descendIdx = 0; return false; }   // down (or out of the house)
+    const st = b.nav.stairs;
+    // heights matter: the foot of the stairs is right below the upper floor, so "close in plan" isn't "arrived"
+    const wps = [{ ...st.top, y: st.fy }, { ...st.step, y: st.fy - 0.25 }, { ...st.bottom, y: b.floorY + 0.15 }];
+    let wp = wps[Math.min(this.descendIdx, 2)];
+    if (this.descendIdx < 2 && Math.hypot(wp.x - p.x, wp.z - p.z) < 0.7 && Math.abs(p.y - wp.y) < 0.9) wp = wps[++this.descendIdx];
+    else if (this.descendIdx === 2 && Math.hypot(wp.x - p.x, wp.z - p.z) < 0.5 && p.y > b.floorY + 1.0) { this.descendIdx = 0; wp = wps[0]; }   // over the foot of the stairs but still upstairs: start over
+    this.moveTo(wp.x, wp.z, { stop: 0.4, direct: true, reckless: true });
+    this.intent.sprint = false;
+    this.faceMove(dt);
+    return true;
+  }
+
+  /** Nearest dry land (coarse radial search), as {x, z} or null. */
+  nearestLand() {
+    const T = this.game.terrain;
+    for (let r = 12; r <= 460; r += 12) {
+      let best = null, bh = 0.8;
+      for (let k = 0; k < 16; k++) {
+        const a = (k / 16) * TAU, x = this.pos.x + Math.cos(a) * r, z = this.pos.z + Math.sin(a) * r;
+        const h = T.heightAt(x, z);
+        if (h > bh) { bh = h; best = { x, z }; }
+      }
+      if (best) return best;
+    }
+    return null;
+  }
+
+  actSwim(dt) {
+    const g = this.game, I = this.intent;
+    if (!this.landT || g.time > this.landT.until) this.landT = { ...(this.nearestLand() || { x: 0, z: 0 }), until: g.time + 3 };
+    this.moveTo(this.landT.x, this.landT.z, { stop: 2, swim: true, reckless: true });
+    I.sprint = true;
+    this.faceMove(dt);
+  }
+
+  actFlee(dt) {
+    const I = this.intent, g = this.game, e = this.enemy;
+    if (!e || !e.alive) { this.state = 'loot'; return; }
+    const dx = this.pos.x - e.pos.x, dz = this.pos.z - e.pos.z, d = Math.hypot(dx, dz) || 1;
+    const ax = dx / d, az = dz / d;
+    // cover first when there's time and material: face the shooter and put a wall between us
+    if (this.buildCd <= 0 && d > 6 && d < 45 && this.inv.mats.wood + this.inv.mats.stone + this.inv.mats.metal >= 20 && this.rng.chance(0.08)) {
+      this.aimYaw = yawTo(this.pos.x, this.pos.z, e.pos.x, e.pos.z);
+      this.buildCover(e);
+      this.buildCd = 5 + this.rng.range(0, 5);
+      return;
+    }
+    // run away, angled to spoil the shooter's aim
+    const side = this.strafe;
+    this.moveTo(this.pos.x + (ax * 0.85 - az * 0.5 * side) * 25, this.pos.z + (az * 0.85 + ax * 0.5 * side) * 25, { stop: 1 });
+    I.sprint = true;
+    this.faceMove(dt);
+    this.strafeT -= dt;
+    if (this.strafeT <= 0) { this.strafeT = 1.2 + this.rng.float() * 1.5; if (this.rng.chance(0.5)) this.strafe *= -1; if (this.rng.chance(0.3)) this.wantJump = 0.2; }
+  }
+
   actHunt(dt) {
     const I = this.intent;
     this.moveTo(this.lastSeen.x, this.lastSeen.z, { stop: 6 });
@@ -633,6 +764,7 @@ export class Bot extends Actor {
     const g = this.game, I = this.intent, D = this.D;
     const e = this.enemy;
     if (!e || !e.alive) { this.state = 'roam'; return; }
+    this.faceUntil = g.time + 0.5;
     const chest = e.chestPos(_v);
     const dx = e.pos.x - this.pos.x, dz = e.pos.z - this.pos.z;
     const dist = Math.hypot(dx, dz);
@@ -728,7 +860,7 @@ export class Bot extends Actor {
         this.alert = { x: a.pos.x, z: a.pos.z, t: this.game.time, src: a };
         this.enemy = a;
         this.lastSeen.x = a.pos.x; this.lastSeen.y = a.pos.y; this.lastSeen.z = a.pos.z; this.lastSeen.t = this.game.time;
-        if (this.state === 'loot' || this.state === 'roam' || this.state === 'heal') { this.state = 'hunt'; this.wc.cancelUse(); }
+        if (this.state === 'loot' || this.state === 'roam' || this.state === 'heal') { this.state = this.hasUsableWeapon() ? 'hunt' : 'flee'; this.wc.cancelUse(); }
       }
       if (this.rng.chance(0.25 + this.skill * 0.3)) this.wantJump = 0.15;
     }

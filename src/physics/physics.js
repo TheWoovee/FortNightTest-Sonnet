@@ -385,7 +385,7 @@ export class Physics {
     // --- terrain ---
     if (opts.terrain !== false) {
       const T = this.terrain;
-      const maxH = 60;
+      const maxH = T.maxH ?? 90;
       if (!(oy > maxH && dy >= 0)) {
         let t = 0, prevT = 0;
         const half = WORLD.half - 1;

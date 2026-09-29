@@ -183,7 +183,10 @@ export class Storm {
     this.tickAcc += dt;
     if (this.tickAcc < 1) return;
     this.tickAcc -= 1;
-    for (const a of actors) {
+    // random starting point: when the last players die to the same tick, nobody is favoured by list order
+    const n = actors.length, off = (Math.random() * n) | 0;
+    for (let k = 0; k < n; k++) {
+      const a = actors[(k + off) % n];
       if (!a.alive || a.mode === 'bus') continue;
       if (this.isOutside(a.pos.x, a.pos.z)) {
         a.takeDamage(this.dps, { cause: 'storm', attacker: null });

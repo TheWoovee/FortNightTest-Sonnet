@@ -183,6 +183,9 @@ export class Terrain {
       if (j % 24 === 23) { onProgress?.(j / n); await tick(); }
     }
     this._computeNormals();
+    let top = 0;
+    for (let i = 0; i < this.h.length; i++) if (this.h[i] > top) top = this.h[i];
+    this.maxH = top + 2;
     this.ready = true;
   }
 

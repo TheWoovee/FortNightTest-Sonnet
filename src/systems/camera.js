@@ -14,6 +14,7 @@ export class CameraRig {
     this.mode = 'menu';
     this.pivotY = 0;
     this.boom = 3.3;
+    this.bodyFade = 1;
     this.fov = 78;
     this.shake = 0;
     this.shakeT = 0;
@@ -136,8 +137,12 @@ export class CameraRig {
     if (_want.y < gh + 0.25) _want.y = gh + 0.25;
     if (sniperScope) _want.copy(_piv).addScaledVector(_fwd, 0.35);
     this._setLook(_want, yaw, pitch);
-    // hide own model when scoped
-    p.model.root.visible = !(this.scopeT > 0.85) && p.alive && p.mode !== 'bus';
+    // hide own model when scoped; in tight quarters the boom collapses onto the shoulder, so fade the body out instead of
+    // letting the lens sit inside the head
+    const near = clamp((this.boom - 0.7) / 0.9, 0, 1);
+    this.bodyFade = damp(this.bodyFade, near, near < this.bodyFade ? 22 : 8, dt);
+    p.model.setFade(this.bodyFade > 0.98 ? 1 : this.bodyFade);
+    p.model.root.visible = !(this.scopeT > 0.85) && p.alive && p.mode !== 'bus' && this.bodyFade > 0.04;
   }
 
   // ---- menu orbit ------------------------------------------------------------------------------------------------------------------
@@ -189,6 +194,7 @@ export class CameraRig {
     if (_want.y < gh + 0.5) _want.y = gh + 0.5;
     this._setLook(_want, yaw, pitch);
     this.fov = damp(this.fov, gliding ? 82 : 92 + clamp(-pitch, 0, 1.2) * 6, 3, dt);
+    if (this.bodyFade !== 1) { this.bodyFade = 1; p.model.setFade(1); }
     p.model.root.visible = true;
   }
 
