@@ -55,7 +55,7 @@ export const STORM_PHASES = [
   { wait: 35,  shrink: 40, radius: 72,  dps: 5 },
   { wait: 30,  shrink: 35, radius: 34,  dps: 8 },
   { wait: 25,  shrink: 30, radius: 12,  dps: 10 },
-  { wait: 15,  shrink: 25, radius: 0,   dps: 12 },
+  { wait: 15,  shrink: 25, radius: 4,   dps: 12 },
 ];
 export const STORM_START_RADIUS = 640;
 

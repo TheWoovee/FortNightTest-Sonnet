@@ -161,7 +161,6 @@ export class Storm {
           this.timer = this.phases[this.index].wait;
           this.dps = this.phases[this.index].dps;
           g.hud?.banner('New safe zone marked', `Storm forms in ${Math.round(this.timer)}s`, 'storm', 4200);
-          if (this.next.r <= 0) this.state = 'final';
         } else { this.state = 'final'; this.next = null; }
       }
     } else if (this.state === 'final') {

@@ -197,6 +197,7 @@ export class CameraRig {
     const g = this.game;
     let t = this.target;
     if (!t || (!t.alive && t !== g.player)) t = this.target = g.pickSpectateTarget?.() || g.player;
+    if (g.viewActor !== t) g.viewActor = t;          // vitals, hotbar, minimap follow whoever we're watching
     const look = g.input.consumeLook();
     this.spectYaw -= look.x * 0.0022; this.spectPitch = clamp(this.spectPitch - look.y * 0.0022, -1.3, 0.9);
     if (!g.input.enabled) this.spectYaw += dt * 0.3;

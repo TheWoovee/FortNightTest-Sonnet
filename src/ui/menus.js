@@ -107,10 +107,11 @@ export class Menus {
     this.overlay.classList.add('on');
     return p;
   }
-  hideOverlay() { this.overlay.classList.remove('on'); }
+  hideOverlay() { this.overlay.classList.remove('on'); this.overlayBack = null; }
   get overlayOpen() { return this.overlay.classList.contains('on'); }
 
   showPause() {
+    this.overlayBack = null;
     const p = this._panel(`<h2>Paused</h2>
       <div class="row" style="flex-direction:column;align-items:flex-start;gap:calc(var(--u)*14)">
         <div class="btn" id="pResume"><span>Resume</span></div>
@@ -130,6 +131,7 @@ export class Menus {
       <h3>Goal</h3><div style="font-size:calc(var(--u)*24);line-height:1.25;color:#dbe6ff;max-width:calc(var(--u)*900)">Jump from the Sky Bus, land, loot weapons, shields and healing, build cover with wood/stone/metal, and stay inside the shrinking storm circle. Eliminate every bot to earn the Victory Royale.</div>
       <div class="row" style="margin-top:calc(var(--u)*24)"><div class="btn small" id="back"><span>Back</span></div></div>`);
     p.querySelector('#back').onclick = () => { this.game.audio?.uiClick(); from === 'pause' ? this.showPause() : this.hideOverlay(); };
+    this.overlayBack = () => p.querySelector('#back').click();
   }
 
   showSettings(from) {
@@ -154,6 +156,7 @@ export class Menus {
     p.querySelector('#sQual').onchange = (e) => { s.quality = e.target.value; g.applySettings(); };
     p.querySelector('#sDiff').onchange = (e) => { s.difficulty = e.target.value; };
     p.querySelector('#back').onclick = () => { this.saveSettings(); this.refreshTitle(); g.audio?.uiClick(); from === 'pause' ? this.showPause() : this.hideOverlay(); };
+    this.overlayBack = () => p.querySelector('#back').click();
   }
 
   // ---- inventory --------------------------------------------------------------------------------------------------------------------------------------------
@@ -212,6 +215,7 @@ export class Menus {
 
   // ---- end screens -----------------------------------------------------------------------------------------------------------------------------------------------
   showEnd(kind, s) {
+    this.showInventory(false); this.showMap(false);
     const e = this.end;
     e.className = `screen on ${kind}`;
     const stat = (n, l) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`;

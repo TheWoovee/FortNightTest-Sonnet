@@ -69,7 +69,7 @@ export class MapView {
     const b = g.phase === 'match' && g.bus?.active && g.player.mode === 'bus';
     if (b) return { x: g.bus.position.x, z: g.bus.position.z, yaw: g.bus.yaw };
     const p = g.viewActor || g.player;
-    return { x: p.pos.x, z: p.pos.z, yaw: p.aimYaw };
+    return { x: p.pos.x, z: p.pos.z, yaw: g.camera?.mode === 'spectate' ? g.camera.yaw : p.aimYaw };
   }
 
   drawStorm(ctx, tx, ty, scale, W, H) {

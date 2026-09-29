@@ -34,6 +34,7 @@ export class Physics {
     this._res = { y: 0, collider: null };
     this._best = new RayHit();
     this._cand = new RayHit();
+    this.onChange = null;       // (collider) => void, fired when a solid appears or disappears
   }
 
   // ---- registration -----------------------------------------------------------------
@@ -53,6 +54,7 @@ export class Physics {
     }
     c.alive = true;
     this.count++;
+    this.onChange?.(c);
     return c;
   }
 
@@ -67,6 +69,7 @@ export class Physics {
     }
     c.alive = false;
     this.count--;
+    this.onChange?.(c);
   }
 
   /**

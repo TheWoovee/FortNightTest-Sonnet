@@ -90,7 +90,7 @@ export const LOOT_TABLES = {
 export const BOT_NAMES = [
   'Blaze', 'Nova', 'Pixel', 'Rogue', 'Zephyr', 'Maverick', 'Comet', 'Viper', 'Echo', 'Jinx', 'Onyx', 'Sunny', 'Bandit', 'Ripley', 'Turbo',
   'Skye', 'Mango', 'Ghost', 'Dash', 'Cinder', 'Tango', 'Quill', 'Ranger', 'Frost', 'Hazel', 'Lynx', 'Orbit', 'Sable', 'Vortex', 'Wren',
-  'Rocket', 'Pebbles', 'Storm', 'Fable', 'Mocha', 'Titan', 'Jade', 'Bolt', 'Cricket', 'Dusty',
+  'Rocket', 'Pebbles', 'Tempest', 'Fable', 'Mocha', 'Titan', 'Jade', 'Bolt', 'Cricket', 'Dusty',
 ];
 
 export const itemName = (it) => {

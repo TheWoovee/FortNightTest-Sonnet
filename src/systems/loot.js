@@ -52,7 +52,9 @@ function discMaterial(color) {
   return m;
 }
 
-function makeChestModel() {
+let _chestGeos = null;
+function chestGeos() {
+  if (_chestGeos) return _chestGeos;
   const body = new GeoBuilder(), lid = new GeoBuilder();
   const gold = 0xf2a81c, dark = 0x7a4a1a, wood = 0xc47a24, metal = 0xffe08a;
   body.box(-0.5, 0, -0.3, 0.5, 0.42, 0.3, wood);
@@ -67,13 +69,20 @@ function makeChestModel() {
   lid.box(-0.44, 0.22, 0.1, 0.44, 0.27, zc * 2 - 0.1, wood);
   lid.box(-0.52, 0.0, -0.02, 0.52, 0.06, zc * 2 + 0.02, gold);
   for (const x of [-0.36, 0.36]) lid.box(x - 0.045, 0.0, -0.025, x + 0.045, 0.24, zc * 2 + 0.025, gold);
+  _chestGeos = { body: body.build(), lid: lid.build() };
+  return _chestGeos;
+}
+
+/** Chest visuals are rebuilt whenever one re-enters draw range, so the geometry is built once and shared. */
+function makeChestModel() {
+  const geos = chestGeos();
   const g = new THREE.Group();
-  const bm = new THREE.Mesh(body.build(), modelMaterial());
+  const bm = new THREE.Mesh(geos.body, modelMaterial());
   bm.castShadow = true; bm.receiveShadow = true;
   g.add(bm);
   const pivot = new THREE.Group();
   pivot.position.set(0, 0.42, -0.3);
-  const lm = new THREE.Mesh(lid.build(), modelMaterial());
+  const lm = new THREE.Mesh(geos.lid, modelMaterial());
   lm.castShadow = true;
   pivot.add(lm);
   g.add(pivot);

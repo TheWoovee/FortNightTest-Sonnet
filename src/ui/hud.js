@@ -36,7 +36,7 @@ export class Hud {
 
   resize() {
     const u = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
-    document.documentElement.style.setProperty('--u', `${Math.max(0.42, u)}px`);
+    document.documentElement.style.setProperty('--u', `${Math.max(0.5, u)}px`);
   }
 
   _buildDom() {
@@ -117,6 +117,24 @@ export class Hud {
   }
 
   setVisible(on) { this.hud.classList.toggle('on', on); }
+
+  /** Clear every transient overlay (scope, vignettes, feed, toasts, prompts, floaters) so nothing leaks into the title screen or the next match. */
+  reset() {
+    const A = this.$;
+    A.scope.classList.remove('on');
+    A.stormVig.style.opacity = 0;
+    A.dmgVig.style.transition = 'none'; A.dmgVig.style.opacity = 0;
+    for (const a of this.dmgArrows) { a.t = 0; a.el.style.opacity = 0; }
+    A.feed.innerHTML = ''; A.toasts.innerHTML = '';
+    clearTimeout(this._bt);
+    A.banner.classList.remove('on'); A.elim.classList.remove('on');
+    A.prompt.classList.remove('on'); A.useBar.classList.remove('on');
+    A.hitmark.className = '';
+    for (const f of this.floaters) { f.el.style.display = 'none'; this.floaterPool.push(f); }
+    this.floaters.length = 0;
+    this.last = {};
+    this.inv = -1;
+  }
   setBuildMode(on) {
     this.hud.classList.toggle('building', on);
     this.slotEls.forEach((s) => (s.root.style.display = on ? 'none' : ''));
@@ -260,13 +278,13 @@ export class Hud {
     if (L.elims !== elims) { L.elims = elims; this.$.chipElims.textContent = elims; }
 
     // hotbar / mats / ammo (diff on inventory version)
-    const inv = p.inv;
-    const buildSig = `${p.building}|${g.build?.piece}|${g.build?.mat}`;
-    if (L.invVer !== inv.version || L.buildSig !== buildSig || L.iconsReady !== !!g.icons) {
-      L.invVer = inv.version; L.buildSig = buildSig; L.iconsReady = !!g.icons;
-      this.refreshInventory();
+    const inv = view.inv;
+    const buildSig = `${view.building}|${g.build?.piece}|${g.build?.mat}`;
+    if (L.invVer !== inv.version || L.buildSig !== buildSig || L.iconsReady !== !!g.icons || L.viewId !== view.id) {
+      L.invVer = inv.version; L.buildSig = buildSig; L.iconsReady = !!g.icons; L.viewId = view.id;
+      this.refreshInventory(view);
     }
-    this.refreshAmmo(p);
+    this.refreshAmmo(view);
 
     // crosshair
     this.updateCrosshair(p, dt);
@@ -310,8 +328,8 @@ export class Hud {
     }
   }
 
-  refreshInventory() {
-    const g = this.game, p = g.player, inv = p.inv, icons = g.icons;
+  refreshInventory(view) {
+    const g = this.game, p = view || g.viewActor || g.player, inv = p.inv, icons = g.icons;
     if (p.building) {
       const b = g.build;
       this.buildEls.forEach((s, i) => {

@@ -9,6 +9,7 @@ import { Combat } from './systems/combat.js';
 import { Loot } from './systems/loot.js';
 import { BuildSystem } from './systems/building.js';
 import { CameraRig } from './systems/camera.js';
+import { Nav } from './systems/nav.js';
 import { Storm } from './world/storm.js';
 import { BattleBus } from './world/bus.js';
 import { Cars } from './world/cars.js';
@@ -71,6 +72,8 @@ export class Game {
     this.combat = new Combat(this);
     this.loot = new Loot(this);
     this.build = new BuildSystem(this);
+    this.nav = new Nav(this);
+    this.physics.onChange = (c) => this.nav.invalidate(c.minX, c.maxX, c.minZ, c.maxZ);
     this.storm = new Storm(this);
     this.bus = new BattleBus(this);
     this.camera = new CameraRig(this);
@@ -129,13 +132,22 @@ export class Game {
       if (this.expectUnlock) { this.expectUnlock = false; return; }
       if (!this.paused && !this.uiBlocking && !this.playerDeadScreen && !this.finished) this.pause();
     } else {
+      // a lock that was requested earlier can be granted after a menu opened — hand it straight back
+      if (this.uiBlocking || this.paused || this.playerDeadScreen) { this.expectUnlock = true; this.input.exitLock(); return; }
       this.menus.showResume(false);
     }
+  }
+
+  /** Free the mouse for a menu. The unlock we cause ourselves must not trigger the auto-pause (only expected if a lock is actually held). */
+  releasePointer() {
+    if (this.input.locked) this.expectUnlock = true;
+    this.input.exitLock();
   }
 
   pause() {
     if (this.paused || this.phase !== 'match') return;
     this.paused = true;
+    this.pausedAt = performance.now();
     this.input.enabled = false;
     this.menus.showPause();
     this.audio.suspend();
@@ -157,6 +169,7 @@ export class Game {
     this.menus.hideOverlay();
     this.menus.showResume(false);
     this.hud.setVisible(false);
+    this.player.model.root.visible = false;
     this.phase = 'menu';
     this.paused = false;
     this.camera.mode = 'menu';
@@ -170,18 +183,16 @@ export class Game {
 
   toggleInventory() {
     if (this.menus.inventoryOpen) { this.closeUi(); return; }
-    this.closeUi();
+    this.menus.showMap(false);
     this.uiBlocking = true;
-    this.expectUnlock = true;
-    this.input.exitLock();
+    this.releasePointer();
     this.menus.showInventory(true);
   }
   toggleMap() {
     if (this.menus.mapOpen) { this.closeUi(); return; }
-    this.closeUi();
+    this.menus.showInventory(false);
     this.uiBlocking = true;
-    this.expectUnlock = true;
-    this.input.exitLock();
+    this.releasePointer();
     this.menus.showMap(true);
   }
   closeUi() {
@@ -196,7 +207,7 @@ export class Game {
 
   setMarker(x, z) {
     this.hud.map.marker = x === null ? null : { x, z };
-    this.world.setMarker?.(x, z);
+    this.world.setMarker(x, z);
     this.hud.map.drawFull();
     this.audio.uiClick();
   }
@@ -204,10 +215,13 @@ export class Game {
   spectate() {
     this.spectating = true;
     this.menus.hideEnd();
+    this.menus.showInventory(false);
+    this.menus.showMap(false);
     this.playerDeadScreen = false;
     this.uiBlocking = false;
     this.camera.mode = 'spectate';
     this.camera.target = this.pickSpectateTarget();
+    this.viewActor = this.camera.target;
     this.input.enabled = true;
     this.input.requestLock();
     this.hud.setVisible(true);
@@ -244,12 +258,15 @@ export class Game {
     this.spectating = false;
     this.viewActor = null;
     this.hud?.map && (this.hud.map.marker = null);
+    this.world?.setMarker(null);
     this.hud?.setBuildMode(false);
     this.hud?.dropPrompt(false);
     this.hud?.altimeter(false);
     this.uiBlocking = false;
+    this.expectUnlock = false;
     this.menus.showInventory(false);
     this.menus.showMap(false);
+    this.hud?.reset();
   }
 
   startMatch() {
@@ -263,6 +280,7 @@ export class Game {
     this.matchSeed = seed;
     this.world.scatter.reset();
     this.cars.reset();
+    this.nav.reset();
     this.loot.populate(this.world, seed);
     this.bus.begin(seed ^ 0x9e3779b9);
     this.storm.reset(seed ^ 0x51ed270b);
@@ -314,7 +332,6 @@ export class Game {
     this.input.enabled = true;
     this.uiBlocking = false;
     this.menus.hideEnd();
-    this.hud.toast('GOOD LUCK, HAVE FUN', '255,233,59');
   }
 
   giveLoadout(p) {
@@ -513,6 +530,8 @@ export class Game {
   /** One simulation step (also used by the test harness). */
   step(dt) {
     if (this.paused) {
+      // Esc backs out of Settings / Controls, or resumes (ignore the very press that opened the pause menu)
+      if (this.input.pressed('Escape') && performance.now() - this.pausedAt > 400) { if (this.menus.overlayBack) this.menus.overlayBack(); else this.resume(); }
       this.world.update(dt * 0.3, this.gfx.camera.position);
       this.input.endFrame();
       return;
@@ -524,6 +543,7 @@ export class Game {
   }
 
   updateMenu(dt) {
+    if (this.input.pressed('Escape') && this.menus.overlayOpen) this.menus.overlayBack?.();
     this.camera.update(dt);
     this.world.update(dt, this.gfx.camera.position);
     this.fx.update(dt);
@@ -537,6 +557,7 @@ export class Game {
     const p = this.player;
     const inp = this.input;
     this.matchTime += dt;
+    this.nav.queries = 0;
 
     // global keys
     if (inp.enabled && !this.playerDeadScreen) {
@@ -593,8 +614,7 @@ export class Game {
       this.playerDeadScreen = true;
       this.uiBlocking = true;
       this.hud.setVisible(false);
-      this.expectUnlock = true;
-      this.input.exitLock();
+      this.releasePointer();
       const st = p.stats;
       this.menus.showEnd('lose', { place: st.placement || this.aliveCount + 1, kills: st.kills, damage: st.damageDealt, time: st.survived || this.matchTime, shots: st.shots, hits: st.hits, players: this.actors.length, ...this.deathInfo });
     }
@@ -603,8 +623,7 @@ export class Game {
       if (this.winner?.isPlayer) {
         this.playerDeadScreen = true;
         this.uiBlocking = true;
-        this.expectUnlock = true;
-        this.input.exitLock();
+        this.releasePointer();
         this.audio.victory();
         const st = p.stats;
         this.hud.setVisible(false);

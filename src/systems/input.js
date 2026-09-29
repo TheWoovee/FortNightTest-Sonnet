@@ -67,7 +67,7 @@ export class Input {
       const was = this.locked;
       this.locked = document.pointerLockElement === c;
       if (was && !this.locked) this.onLockChange?.(false);
-      if (!was && this.locked) this.onLockChange?.(true);
+      if (!was && this.locked) { this.freeLook = false; this.onLockChange?.(true); }
     });
     document.addEventListener('pointerlockerror', () => {
       // Browsers refuse re-locking for ~1 s after Esc; retry before giving up (sandboxed iframes never succeed).

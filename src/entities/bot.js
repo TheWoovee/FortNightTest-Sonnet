@@ -57,6 +57,10 @@ export class Bot extends Actor {
     this.avoidDir = 0;
     this.avoidT = 0;
     this.giveUp = 0;
+    this.pathGoal = { x: 0, z: 0 }; this.pathY = 0; this.pathRetryAt = 0; this.noRoute = 0;      // A* route following
+    this.wpX = 0; this.wpZ = 0; this.wpSet = -9; this.wdT = 0; this.wdFail = 0; this.wdD = 0; this.wdX = 0; this.wdZ = 0;   // progress watchdog
+    this.ignore = new Map();          // loot objects this bot has given up on → time until it may try again
+    this.elevated = false;            // standing on a roof / platform well above the ground
     this.scanCd = rng.float();
     this.sprintMode = true;
     this.inv.mats.wood = 60 + Math.floor(rng.float() * 240);
@@ -150,6 +154,7 @@ export class Bot extends Actor {
     const g = this.game;
     this.perceive();
     const t = g.time;
+    this.elevated = this.onGround && this.pos.y - g.terrain.heightAt(this.pos.x, this.pos.z) > 2.2 && !g.physics.overlaps(this.pos.x, this.pos.y, this.pos.z, 0.2, 0.2, 0);
     // enemy memory
     const haveEnemy = this.enemy && this.enemy.alive && (this.enemyVisible || t - this.lastSeen.t < 3.5);
     const storm = g.storm;
@@ -265,6 +270,8 @@ export class Bot extends Actor {
   lootTargetValid() {
     const t = this.lootTarget;
     if (!t) return false;
+    const ty = t.type === 'chest' ? t.c.y : t.it.y;
+    if (this.onGround && Math.abs(ty - this.pos.y) > 3.2) return false;        // e.g. we landed on the roof above it
     if (t.type === 'chest') return !t.c.opened;
     return t.it.alive;
   }
@@ -275,7 +282,7 @@ export class Bot extends Actor {
     let best = null, bs = 0;
     const hasW = this.inv.hasWeapon();
     for (const it of L.items) {
-      if (!it.alive || g.time < it.noPickupUntil) continue;
+      if (!it.alive || g.time < it.noPickupUntil || this.ignore.get(it) > g.time) continue;
       if (it.floorLevel > 0 && Math.abs(it.y - py) > 1.5) continue;
       const dx = it.x - px, dz = it.z - pz;
       const d = Math.hypot(dx, dz);
@@ -287,7 +294,7 @@ export class Bot extends Actor {
     }
     if (!hasW || this.inv.weaponCount() < 2) {
       for (const c of L.chests) {
-        if (c.opened) continue;
+        if (c.opened || this.ignore.get(c) > g.time || Math.abs(c.y - py) > 3.2) continue;
         const d = Math.hypot(c.x - px, c.z - pz);
         if (d > maxDist) continue;
         const score = 95 * 10 / (d + 6);
@@ -321,15 +328,52 @@ export class Bot extends Actor {
     return 0;
   }
 
+  /** New loot target → forget the old route; followGoal() plans lazily. */
   planPath(target) {
-    this.path = null; this.pathIdx = 0;
-    const g = this.game;
-    let tx, tz, b = null;
-    if (target.type === 'chest') { tx = target.c.x; tz = target.c.z; b = this.buildingAt(tx, tz); }
-    else { tx = target.it.x; tz = target.it.z; b = target.it.building || this.buildingAt(tx, tz); }
-    if (b && !this.insideRect(this.pos.x, this.pos.z, b.rect)) {
-      this.path = [b.nav.doorOut, b.nav.doorIn, { x: tx, z: tz }];
-    } else if (b) this.path = [{ x: tx, z: tz }];
+    this.path = null; this.pathIdx = 0; this.noRoute = 0; this.pathRetryAt = 0;
+  }
+
+  /** Compute an A* route toward (gx, gz); long trips are planned in ~80 m legs. */
+  computePath(gx, gz) {
+    const g = this.game, nav = g.nav;
+    if (!nav.canQuery()) { this.pathRetryAt = g.time + 0.05; return; }        // another bot planned this frame
+    let tx = gx, tz = gz;
+    const dx = gx - this.pos.x, dz = gz - this.pos.z, d = Math.hypot(dx, dz);
+    if (d > 100) { tx = this.pos.x + (dx / d) * 80; tz = this.pos.z + (dz / d) * 80; }
+    const path = nav.findPath(this.pos.x, this.pos.z, tx, tz);
+    this.pathGoal = { x: gx, z: gz }; this.pathY = this.pos.y; this.pathIdx = 0;
+    if (path) { this.path = path; this.noRoute = 0; this.pathRetryAt = 0; }
+    else { this.path = null; this.noRoute++; this.pathRetryAt = g.time + 1.5; }
+  }
+
+  /** Walk toward (gx, gz) along an A* route (re-planned when the goal moves, the level changes or a leg ends). Returns the distance left. */
+  followGoal(gx, gz, opts = {}) {
+    const g = this.game, stop = opts.stop ?? 0.9;
+    const stale = !this.path || Math.hypot(this.pathGoal.x - gx, this.pathGoal.z - gz) > 2.5 || Math.abs(this.pos.y - this.pathY) > 2.4;
+    if (stale && g.time >= this.pathRetryAt && Math.hypot(gx - this.pos.x, gz - this.pos.z) > stop + 0.5) this.computePath(gx, gz);
+    if (this.path) {
+      let node = this.path[this.pathIdx];
+      while (node && Math.hypot(node.x - this.pos.x, node.z - this.pos.z) < (node.last ? stop : 1.0)) node = this.path[++this.pathIdx];
+      if (node) {
+        this.moveTo(node.x, node.z, { ...opts, stop: node.last ? stop : 0.3 });
+        return Math.hypot(gx - this.pos.x, gz - this.pos.z);
+      }
+      this.path = null;         // leg finished
+    }
+    return this.moveTo(gx, gz, { ...opts, stop });      // no route (yet): steer directly, the watchdog will give up if it goes nowhere
+  }
+
+  /** No meaningful progress toward the current waypoint for several seconds. */
+  noProgress() {
+    this.path = null; this.pathRetryAt = 0;
+    this.unstick = 1.0; this.unstickDir = this.rng.chance(0.5) ? 1 : -1; this.wantJump = 0.5;
+    if (++this.giveUp >= 3) { this.giveUp = 0; this.abandonTarget(); }
+  }
+
+  abandonTarget() {
+    const t = this.game.time, lt = this.lootTarget;
+    if (lt) this.ignore.set(lt.type === 'chest' ? lt.c : lt.it, t + 120);
+    this.lootTarget = null; this.path = null; this.roamTarget = null; this.roamT = 0; this.thinkT = 0;
   }
 
   buildingAt(x, z) {
@@ -412,9 +456,22 @@ export class Bot extends Actor {
       const trying = Math.hypot(I.moveX, I.moveZ) > 0.1;
       this.stuckT = trying && moved < 0.3 ? this.stuckT + 0.5 : 0;
       this.lastPos.copy(this.pos);
-      if (this.stuckT >= 1.0) { this.unstick = 1.0; this.unstickDir = this.rng.chance(0.5) ? 1 : -1; this.stuckT = 0; this.wantJump = 0.6; this.path = null; if (this.state === 'loot') this.giveUp++; if (this.giveUp > 2) { this.lootTarget = null; this.giveUp = 0; } }
+      if (this.stuckT >= 1.0) { this.stuckT = 0; this.noProgress(); }
     }
     this.unstick = Math.max(0, this.unstick - dt);
+    // progress watchdog: bumping around near a waypoint without getting closer (the position check above can't see that)
+    this.wdT -= dt;
+    if (this.wdT <= 0) {
+      this.wdT = 1.5;
+      const live = t - this.wpSet < 0.4;
+      if (live && Math.hypot(this.wpX - this.wdX, this.wpZ - this.wdZ) < 0.75) {
+        const d = Math.hypot(this.wpX - this.pos.x, this.wpZ - this.pos.z);
+        this.wdFail = this.wdD - d < 0.8 && d > 1.2 ? this.wdFail + 1 : 0;
+        this.wdD = d;
+        if (this.wdFail >= 3) { this.wdFail = 0; this.noProgress(); }
+      } else { this.wdFail = 0; this.wdD = Math.hypot(this.wpX - this.pos.x, this.wpZ - this.pos.z); }
+      this.wdX = this.wpX; this.wdZ = this.wpZ;
+    }
 
     switch (this.state) {
       case 'combat': this.actCombat(dt); break;
@@ -437,6 +494,7 @@ export class Bot extends Actor {
     const I = this.intent;
     let dx = x - this.pos.x, dz = z - this.pos.z;
     const d = Math.hypot(dx, dz);
+    this.wpX = x; this.wpZ = z; this.wpSet = this.game.time;
     if (d < (opts.stop ?? 0.6)) return d;
     dx /= d; dz /= d;
     let ang = Math.atan2(dz, dx);
@@ -448,7 +506,7 @@ export class Bot extends Actor {
       const h = phys.groundAt(px, pz, this.pos.y + 0.6).y;
       const wl = T.waterLevelAt(px, pz);
       if (wl !== null && wl - h > 0.9 && !opts.swim) return 'water';
-      if (this.pos.y - h > 3.2 && !opts.reckless) return 'drop';
+      if (this.pos.y - h > 3.2 && !opts.reckless && !this.elevated) return 'drop';
       return 'ok';
     };
     let res = probe(ang, 1.5);
@@ -482,7 +540,8 @@ export class Bot extends Actor {
     const I = this.intent, g = this.game;
     this.roamT -= dt;
     if (!this.roamTarget || this.roamT <= 0 || Math.hypot(this.roamTarget.x - this.pos.x, this.roamTarget.z - this.pos.z) < 5) this.pickRoamTarget();
-    const d = this.moveTo(this.roamTarget.x, this.roamTarget.z, { stop: 3 });
+    const d = this.followGoal(this.roamTarget.x, this.roamTarget.z, { stop: 3 });
+    if (this.noRoute >= 2) { this.noRoute = 0; this.roamTarget = null; this.roamT = 0; }     // unreachable: pick another spot
     I.sprint = d > 14;
     // look where we walk
     this.faceMove(dt);
@@ -503,14 +562,8 @@ export class Bot extends Actor {
     const tgt = this.lootTarget;
     if (!tgt) { this.actRoam(dt); return; }
     const tx = tgt.type === 'chest' ? tgt.c.x : tgt.it.x, tz = tgt.type === 'chest' ? tgt.c.z : tgt.it.z;
-    let gx = tx, gz = tz;
-    if (this.path) {
-      const node = this.path[Math.min(this.pathIdx, this.path.length - 1)];
-      gx = node.x; gz = node.z;
-      if (Math.hypot(gx - this.pos.x, gz - this.pos.z) < 1.4 && this.pathIdx < this.path.length - 1) this.pathIdx++;
-    }
-    const finalNode = !this.path || this.pathIdx >= this.path.length - 1;
-    const d = this.moveTo(gx, gz, { stop: finalNode ? 0.9 : 0.8 });
+    const d = this.followGoal(tx, tz, { stop: 0.9 });
+    if (this.noRoute >= 3) { this.noRoute = 0; this.abandonTarget(); return; }
     I.sprint = d > 10;
     this.faceMove(dt);
     const dd = Math.hypot(tx - this.pos.x, tz - this.pos.z);

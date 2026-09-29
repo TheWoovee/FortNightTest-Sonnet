@@ -63,6 +63,7 @@ s = await snap();
 check('player glides and lands', s.player.mode === 'ground' && s.player.onGround, `pos ${s.player.pos}`);
 
 // --- systems exercised on the ground ------------------------------------------------------------------------------------------
+// (debugGround parks the bots on the bus so nothing interferes; the soak below starts a fresh match)
 const r = await page.evaluate(() => {
   const g = window.__game, p = g.player, out = {};
   g.debugGround(-25, 46.5, -Math.PI / 2);
@@ -75,22 +76,23 @@ const r = await page.evaluate(() => {
   g.input.mouseDown[0] = false;
   out.shots = p.stats.shots - shotsBefore;
   out.mag = p.inv.current.mag;
-  // building
-  p.inv.mats.wood = 100;
-  p.aimYaw = p.baseYaw = -Math.PI / 2; p.aimPitch = p.basePitch = -0.1;
-  const w = g.build.tryPlace(p, 'wall', 'wood');
-  const f = g.build.tryPlace(p, 'ramp', 'wood');
-  out.pieces = g.build.list.length; out.wood = p.inv.mats.wood;
-  // loot + chest
+  // loot + chest (before building puts walls in the way)
+  p.inv.removeSlot(3);                                 // the practice loadout fills every slot; free one
   const item = { kind: 'weapon', id: 'smg', rarity: 1, mag: 30 };
-  const it = g.loot.spawn(item, p.pos.x + 0.5, p.pos.y, p.pos.z, {});
+  g.loot.spawn(item, p.pos.x + 0.5, p.pos.y, p.pos.z, {});
   const n0 = p.inv.weaponCount();
   g.loot.interact(p);
   out.pickedUp = p.inv.weaponCount() > n0;
-  g.loot.spawnChest(p.pos.x + 1.2, p.pos.y, p.pos.z, 0);
+  g.loot.spawnChest(p.pos.x, p.pos.y, p.pos.z + 1.4, 0);
   const n1 = g.loot.items.filter((i) => i.alive).length;
   g.loot.interact(p);
   out.chestItems = g.loot.items.filter((i) => i.alive).length - n1;
+  // building
+  p.inv.mats.wood = 100;
+  p.aimYaw = p.baseYaw = -Math.PI / 2; p.aimPitch = p.basePitch = -0.1;
+  g.build.tryPlace(p, 'wall', 'wood');
+  g.build.tryPlace(p, 'ramp', 'wood');
+  out.pieces = g.build.list.length; out.wood = p.inv.mats.wood;
   // pickaxe harvest
   p.inv.select(0);
   const woodBefore = p.inv.mats.wood;
@@ -106,11 +108,13 @@ check('item pickup works', r.pickedUp);
 check('chest opens and drops loot', r.chestItems >= 3, `${r.chestItems} items`);
 check('pickaxe harvests trees', r.harvested);
 
-// --- long soak: bots fight, storm shrinks ---------------------------------------------------------------------------------------------
-await page.evaluate(() => { const g = window.__game; g.player.invulnerable = true; g.debugGround(-25, 46.5, 0); });
-await sim(90, 1 / 15);
+// --- long soak: a fresh match, bots loot and fight while the storm shrinks -------------------------------------------------------------
+await page.evaluate(() => { const g = window.__game; g.startMatch(); g.player.invulnerable = true; });
+await sim(150, 1 / 15);
 s = await snap();
-check('bots loot, fight and get eliminated', s.alive < 30, `alive ${s.alive}`);
+check('bots loot, fight and get eliminated', s.alive < 24, `alive ${s.alive}`);
+const stuck = await page.evaluate(() => window.__game.bots.filter((b) => b.alive && b.mode === 'ground' && b.state === 'loot' && !b.lootTarget).length);
+check('bots are not wedged without a target', stuck < 4, `${stuck} idle`);
 const sane = await page.evaluate(() => {
   const g = window.__game;
   return g.actors.every((a) => Number.isFinite(a.pos.x + a.pos.y + a.pos.z) && Math.abs(a.pos.x) < 700 && a.pos.y > -60);

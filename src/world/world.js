@@ -145,6 +145,27 @@ export class World {
     ctx.setLineDash([]);
   }
 
+  /** Player waypoint: a tall additive beam so it can be spotted from across the island. Pass null to clear. */
+  setMarker(x, z) {
+    if (x === null || x === undefined) { if (this.markerMesh) this.markerMesh.visible = false; return; }
+    if (!this.markerMesh) {
+      const geo = new THREE.CylinderGeometry(1.1, 1.1, 1, 14, 1, true);
+      geo.translate(0, 0.5, 0);
+      const mat = new THREE.ShaderMaterial({
+        vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+        fragmentShader: 'varying vec2 vUv; void main(){ float a = pow(1.0 - vUv.y, 0.7) * 0.42; gl_FragColor = vec4(1.0, 0.86, 0.22, a); }',
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
+      });
+      this.markerMesh = new THREE.Mesh(geo, mat);
+      this.markerMesh.scale.set(1, 320, 1);
+      this.markerMesh.frustumCulled = false;
+      this.markerMesh.renderOrder = 3;
+      this.scene.add(this.markerMesh);
+    }
+    this.markerMesh.position.set(x, Math.max(0, this.terrain.heightAt(x, z)), z);
+    this.markerMesh.visible = true;
+  }
+
   update(dt, cameraPos) {
     this.time += dt;
     this.sky.update(dt, cameraPos);
