@@ -44,7 +44,7 @@ Needs a desktop browser with WebGL2 (recent Chrome, Edge, Firefox or Safari), a 
 
 ## What's in the box
 
-* **Battle royale loop** — Sky Bus flight, choose when to jump, skydive (look down to dive, level out to glide farther), auto-glider, landing, looting, fights, and a Victory Royale screen. 30 players by default (1–60 configurable), three bot difficulties.
+* **Battle royale loop** — Sky Bus flight, choose when to jump, skydive (look down to dive, level out to glide farther), auto-glider, landing, looting, fights, and a Victory Royale screen. 30 players by default (6–50 in Settings), three bot difficulties.
 * **Third-person combat** — over-the-shoulder camera with camera collision, ADS zoom, sprint FOV kick, a scoped sniper view, recoil/bloom/spread, headshots, damage falloff, hit markers, floating damage numbers and directional damage indicators. Weapons: assault rifle, SMG, pump shotgun, bolt-action sniper, pistol, plus the pickaxe.
 * **Loot & inventory** — Common → Legendary rarities with Fortnite-style colour-coded beams, chests, ammo boxes, bandages, med kits, mini/big shield potions and chug jugs. A 6-slot hotbar (item icons are rendered live from the 3D models), Tab inventory with drop buttons, ammo reserves by type and materials.
 * **Health & shields** — shield absorbs damage first; healing items are hold-to-use and cancel when interrupted.
